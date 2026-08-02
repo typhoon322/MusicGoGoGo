@@ -8,14 +8,23 @@
 #error "Define BOARD_S3_DEV in platformio build_flags"
 #endif
 
-// Display refresh target (ms between spectrum frames)
-#define SPECTRUM_FRAME_MS 33
+// Target ~40 FPS UI refresh
+#define SPECTRUM_FRAME_MS 25
 
-// Bar fall-off per frame (0.0–1.0, higher = slower decay)
+// Legacy decay (band processor handles primary smoothing)
 #define SPECTRUM_DECAY 0.82f
 
-// Software gain applied to I2S samples (tune via serial if needed)
 #define AUDIO_GAIN_DEFAULT 2.0f
 
-// Status log interval
+// Potentiometer → mic gain (ADC on PIN_GAIN_POT)
+#define GAIN_POT_MIN 0.4f
+#define GAIN_POT_MAX 8.0f
+
 #define STATUS_LOG_MS 2000
+
+// VFX auto-rotate interval (0 = disable)
+#define VFX_AUTO_CYCLE_MS 12000
+
+#define VFX_LOG_BANDS 12
+#define VFX_WATERFALL_BINS 160
+#define VFX_WATERFALL_HISTORY 200

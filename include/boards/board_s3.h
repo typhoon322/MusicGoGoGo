@@ -26,6 +26,14 @@
 #define PIN_TFT_RST 14
 #define PIN_TFT_BL 3
 
+// KY-040 rotary encoder (active LOW, internal pull-up)
+#define PIN_ENC_CLK 8
+#define PIN_ENC_DT 9
+#define PIN_ENC_SW 15
+
+// Gain potentiometer — wiper to ADC, ends to 3.3V / GND
+#define PIN_GAIN_POT 1
+
 // Native panel is 240×320; rotation 1 → 320×240 landscape
 #define TFT_NATIVE_W 240
 #define TFT_NATIVE_H 320

@@ -1,24 +1,34 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "config.h"
+
+struct SpectrumFrame {
+  float linear32[SPECTRUM_BARS];
+  float log12[VFX_LOG_BANDS];
+  float mirror32[SPECTRUM_BARS];
+  float waterfallRow[VFX_WATERFALL_BINS];
+  float line32[SPECTRUM_BARS];
+  float peakLevel;
+  float vuLevel;
+};
 
 class SpectrumAnalyzer {
  public:
   bool begin();
-
-  // Feed time-domain samples (length == FFT_SIZE), compute bar levels 0.0–1.0
   void analyze(const int16_t *samples, size_t count);
 
-  const float *bars() const { return bars_; }
-  size_t barCount() const { return SPECTRUM_BARS; }
-
-  float peakBinLevel() const { return peakBinLevel_; }
+  const SpectrumFrame &frame() const { return frame_; }
 
  private:
+  void fillLogBands_(float *out, size_t count);
+  void fillLinearBands_(float *out, size_t count, bool linearSpacing);
+  void fillWaterfallRow_();
+  float magnitudeToLevel_(float mag) const;
+
   float real_[FFT_SIZE] = {};
   float imag_[FFT_SIZE] = {};
-  float bars_[SPECTRUM_BARS] = {};
-  float peakBinLevel_ = 0.0f;
+  SpectrumFrame frame_ = {};
 };

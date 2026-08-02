@@ -28,7 +28,28 @@ pio run -e esp32-s3-dev -t upload
 pio device monitor
 ```
 
-上电后 TFT 显示 32 柱动态频谱；串口 115200 每 2 秒打印 RMS / Peak / FPS。
+上电后 **7 种 VFX 自动轮播**（12 秒/模式）。
+
+## 操作
+
+| 输入 | 功能 |
+|------|------|
+| **编码器旋转** | 上 / 下一个 VFX |
+| **编码器按下** | 开关自动轮播 |
+| **电位器** | 麦克风增益（0.4–8×） |
+| 串口 `n`/`p`/`a` | 同上的备用控制 |
+
+## VFX 模式
+
+| 模式 | 效果 |
+|------|------|
+| Bars 32 | 32 柱 + 渐变 + peak 落点 |
+| Log 12 | 12 段对数宽柱 |
+| Mirror | 中心对称镜面 + 彩虹 |
+| VU Meter | 24 段电平表 + 迷你频谱 |
+| Waterfall | 热力瀑布图 |
+| Rainbow | 彩虹柱 + 色相滚动 |
+| Line Peaks | 折线峰值 |
 
 ## 工程结构
 
@@ -37,11 +58,15 @@ MusicGoGoGo/
 ├── platformio.ini
 ├── src/
 │   ├── main.cpp
-│   ├── audio/i2s_mic.*       # INMP441 I2S 采集
-│   ├── dsp/spectrum_analyzer.*  # FFT + 对数频段
-│   └── display/display_driver.* # ST7789 柱状频谱
+│   ├── audio/i2s_mic.*
+│   ├── dsp/band_processor.*      # 平滑 / 自动电平 / peak
+│   ├── dsp/spectrum_analyzer.*   # FFT 多频段输出
+│   └── display/
+│       ├── display_driver.*
+│       └── vfx_renderer.*        # 7 种视觉效果
 ├── include/
 │   ├── config.h
+│   ├── vfx.h
 │   └── boards/board_s3.h
 └── docs/
 ```
@@ -55,7 +80,8 @@ MusicGoGoGo/
 | `AUDIO_GAIN_DEFAULT` | 2.0 | 麦克风软件增益 |
 | `FFT_SIZE` | 512 | FFT 点数（`board_s3.h`） |
 | `SPECTRUM_BARS` | 32 | 柱状数量 |
-| `SPECTRUM_DECAY` | 0.82 | 柱下落速度 |
+| `VFX_AUTO_CYCLE_MS` | 12000 | 自动轮播间隔（0=关闭） |
+| `SPECTRUM_FRAME_MS` | 25 | 目标帧间隔 (~40 FPS) |
 | `TFT_Y_OFFSET` | 0 | 屏偏移（图像错位时调整） |
 
 ## 文档索引
