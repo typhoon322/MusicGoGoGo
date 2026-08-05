@@ -1,39 +1,96 @@
 #include "display/display_driver.h"
 
+#include "config.h"
+#include "display/tft_colors.h"
+#include "display/vfx_renderer.h"
+
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+#include <M5Cardputer.h>
+#else
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
-
-#include "config.h"
-#include "display/vfx_renderer.h"
+#endif
 
 namespace {
+#if defined(BOARD_CARDPUTER_ADV) && !CARDPUTER_USE_BUILTIN_LCD
+SPIClass tftSpi(HSPI);
+Adafruit_ST7789 tft(&tftSpi, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
+#elif !defined(BOARD_CARDPUTER_ADV)
 Adafruit_ST7789 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
+#endif
 VfxRenderer vfx;
+
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+VfxTft &activeTft() {
+  return M5Cardputer.Display;
+}
+#else
+VfxTft &activeTft() {
+  return tft;
+}
+#endif
 }  // namespace
 
 bool DisplayDriver::begin(uint8_t backlightLevel) {
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  VfxTft &tft = activeTft();
+  tft.setRotation(1);
+  tft.setBrightness(backlightLevel);
+  tft.fillScreen(TFT_COL_BLACK);
+  tft.setTextWrap(false);
+  vfx.attach(&tft);
+  vfx.resetBarCache();
+  initialized_ = true;
+  Serial.printf("[tft] OK builtin %dx%d\n", TFT_WIDTH, TFT_HEIGHT);
+  return true;
+#else
+  pinMode(PIN_TFT_RST, OUTPUT);
+  digitalWrite(PIN_TFT_RST, HIGH);
+  delay(10);
+  digitalWrite(PIN_TFT_RST, LOW);
+  delay(20);
+  digitalWrite(PIN_TFT_RST, HIGH);
+  delay(20);
+
   pinMode(PIN_TFT_BL, OUTPUT);
   setBacklight(backlightLevel);
 
+#if defined(BOARD_CARDPUTER_ADV)
+  Serial.println(F("[tft] init HSPI..."));
+  tftSpi.end();
+  tftSpi.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, PIN_TFT_CS);
+#else
   SPI.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, PIN_TFT_CS);
+#endif
+  Serial.println(F("[tft] st7789 init..."));
   tft.init(TFT_NATIVE_W, TFT_NATIVE_H);
   if (TFT_X_OFFSET != 0 || TFT_Y_OFFSET != 0) {
     tft.setAddrWindow(TFT_X_OFFSET, TFT_Y_OFFSET, TFT_WIDTH, TFT_HEIGHT);
   }
   tft.setRotation(1);
-  tft.fillScreen(ST77XX_BLACK);
+  tft.fillScreen(TFT_COL_BLACK);
   tft.setTextWrap(false);
-
+#if defined(BOARD_CARDPUTER_ADV)
+  tft.setSPISpeed(20000000);
+#endif
   vfx.attach(&tft);
+  vfx.resetBarCache();
   initialized_ = true;
   Serial.printf("[tft] OK %dx%d st7789\n", TFT_WIDTH, TFT_HEIGHT);
   return true;
+#endif
 }
 
 void DisplayDriver::setBacklight(uint8_t level) {
   backlightLevel_ = level;
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  activeTft().setBrightness(level);
+#elif defined(BOARD_CARDPUTER_ADV)
+  digitalWrite(PIN_TFT_BL, level > 0 ? HIGH : LOW);
+#else
   analogWrite(PIN_TFT_BL, level);
+#endif
 }
 
 void DisplayDriver::nextMode() {
@@ -54,42 +111,81 @@ void DisplayDriver::setMode(VfxMode mode) {
     mode_ = mode;
     waterfallHead_ = 0;
     vfx.resetWaterfall();
+    vfx.resetHeaderCache();
+    vfx.resetBarCache();
+    if (initialized_) {
+      vfx.clearPlotArea();
+    }
     Serial.printf("[vfx] mode -> %s\n", vfxModeName(mode_));
   }
 }
+
+#if defined(BOARD_CARDPUTER_ADV)
+void DisplayDriver::toggleDebugOverlay() {
+  debugOverlay_ = !debugOverlay_;
+  vfx.resetHeaderCache();
+  Serial.printf("[ui] debug overlay %s\n", debugOverlay_ ? "ON" : "OFF");
+}
+#endif
 
 void DisplayDriver::showSplash() {
   if (!initialized_) {
     return;
   }
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setTextColor(ST77XX_CYAN);
+  VfxTft &tft = activeTft();
+  tft.fillScreen(TFT_COL_BLACK);
+  tft.setTextColor(TFT_COL_CYAN);
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  tft.setTextSize(2);
+  tft.setCursor(8, 40);
+#else
   tft.setTextSize(3);
   tft.setCursor(24, 80);
+#endif
   tft.print(F("MusicGoGoGo"));
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_COL_WHITE);
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  tft.setCursor(24, 70);
+  tft.print(F("Loading..."));
+#else
   tft.setTextSize(2);
-  tft.setTextColor(ST77XX_WHITE);
   tft.setCursor(56, 120);
   tft.print(F("VFX Loading..."));
+#endif
 }
 
 void DisplayDriver::showError(const char *message) {
   if (!initialized_) {
     return;
   }
-  tft.fillScreen(ST77XX_BLACK);
-  tft.setTextColor(ST77XX_RED);
+  VfxTft &tft = activeTft();
+  tft.fillScreen(TFT_COL_BLACK);
+  tft.setTextColor(TFT_COL_RED);
   tft.setTextSize(2);
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  tft.setCursor(8, 48);
+#else
   tft.setCursor(8, 100);
+#endif
   tft.print(F("Error"));
-  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextColor(TFT_COL_WHITE);
   tft.setTextSize(1);
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  tft.setCursor(8, 72);
+#else
   tft.setCursor(8, 130);
+#endif
   tft.print(message != nullptr ? message : "unknown");
 }
 
 void DisplayDriver::render(const SpectrumFrame &spec, const float *levels, const float *peaks,
-                           size_t count, float rms, float peak) {
+                           size_t count, float rms, float peak
+#if defined(BOARD_CARDPUTER_ADV)
+                           ,
+                           const MicDebugInfo &micDebug
+#endif
+) {
   if (!initialized_ || levels == nullptr || peaks == nullptr || count == 0) {
     return;
   }
@@ -100,6 +196,18 @@ void DisplayDriver::render(const SpectrumFrame &spec, const float *levels, const
   ctx.vu = spec.vuLevel;
   ctx.frameMs = millis();
   ctx.mode = mode_;
+#if defined(BOARD_CARDPUTER_ADV)
+  ctx.showMicDebug = debugOverlay_;
+  ctx.batteryPercent = micDebug.batteryPercent;
+  ctx.micRawMin = micDebug.rawMin;
+  ctx.micRawMax = micDebug.rawMax;
+  ctx.micRawMean = micDebug.rawMean;
+  ctx.micGain = micDebug.gain;
+  ctx.band0 = micDebug.bands[0];
+  ctx.band1 = micDebug.bands[1];
+  ctx.band2 = micDebug.bands[2];
+  ctx.band3 = micDebug.bands[3];
+#endif
 
   vfx.draw(ctx, mode_, levels, peaks, count, waterfallHistory_, waterfallHead_);
 }

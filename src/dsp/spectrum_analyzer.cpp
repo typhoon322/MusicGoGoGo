@@ -19,11 +19,33 @@ size_t binForFrequency(float hz) {
 }
 
 float logEdgeHz(size_t index, size_t count) {
+#if defined(BOARD_CARDPUTER_ADV)
+  const float minHz = 90.0f;
+#else
   const float minHz = 60.0f;
+#endif
   const float maxHz = static_cast<float>(I2S_SAMPLE_RATE) * 0.48f;
   const float t = static_cast<float>(index) / static_cast<float>(count);
   return minHz * powf(maxHz / minHz, t);
 }
+
+#if defined(BOARD_CARDPUTER_ADV)
+float bassWeight_(size_t band) {
+  static const float kWeights[] = {0.82f, 0.88f, 0.92f, 0.96f};
+  if (band >= 4) {
+    return 1.0f;
+  }
+  return kWeights[band];
+}
+
+size_t lowBinSkip_(size_t band) {
+  static const size_t kSkip[] = {5, 3, 2, 1};
+  if (band >= 4) {
+    return 0;
+  }
+  return kSkip[band];
+}
+#endif
 
 float avgMagnitude(const float *mags, size_t lo, size_t hi) {
   if (hi <= lo) {
@@ -52,9 +74,15 @@ float SpectrumAnalyzer::magnitudeToLevel_(float mag) const {
 
 void SpectrumAnalyzer::fillLogBands_(float *out, size_t count) {
   for (size_t b = 0; b < count; ++b) {
-    const size_t lo = binForFrequency(logEdgeHz(b, count));
-    const size_t hi = binForFrequency(logEdgeHz(b + 1, count));
-    const float mag = avgMagnitude(real_, lo, hi < lo + 1 ? lo + 1 : hi);
+    size_t lo = binForFrequency(logEdgeHz(b, count));
+    size_t hi = binForFrequency(logEdgeHz(b + 1, count));
+    if (lo == 0) {
+      lo = 1;
+    }
+    if (hi <= lo) {
+      hi = lo + 1;
+    }
+    const float mag = avgMagnitude(real_, lo, hi);
     out[b] = magnitudeToLevel_(mag);
   }
 }
@@ -67,6 +95,17 @@ void SpectrumAnalyzer::fillLinearBands_(float *out, size_t count, bool linearSpa
     if (linearSpacing) {
       lo = (b * maxBin) / count;
       hi = ((b + 1) * maxBin) / count;
+#if defined(BOARD_CARDPUTER_ADV)
+      const size_t skip = lowBinSkip_(b);
+      if (lo < skip) {
+        lo = skip;
+      }
+#else
+      // Skip DC + very low bins (1/f noise)
+      if (b == 0 && lo < 4) {
+        lo = 4;
+      }
+#endif
     } else {
       lo = binForFrequency(logEdgeHz(b, count));
       hi = binForFrequency(logEdgeHz(b + 1, count));
@@ -77,8 +116,14 @@ void SpectrumAnalyzer::fillLinearBands_(float *out, size_t count, bool linearSpa
     if (hi > maxBin) {
       hi = maxBin;
     }
+    if (lo == 0) {
+      lo = 1;
+    }
     const float mag = avgMagnitude(real_, lo, hi);
     out[b] = magnitudeToLevel_(mag);
+#if defined(BOARD_CARDPUTER_ADV)
+    out[b] *= bassWeight_(b);
+#endif
   }
 }
 
@@ -91,8 +136,14 @@ void SpectrumAnalyzer::analyze(const int16_t *samples, size_t count) {
     return;
   }
 
+  double mean = 0.0;
   for (size_t i = 0; i < FFT_SIZE; ++i) {
-    real_[i] = static_cast<float>(samples[i]);
+    mean += static_cast<double>(samples[i]);
+  }
+  mean /= static_cast<double>(FFT_SIZE);
+
+  for (size_t i = 0; i < FFT_SIZE; ++i) {
+    real_[i] = static_cast<float>(static_cast<double>(samples[i]) - mean);
     imag_[i] = 0.0f;
   }
 

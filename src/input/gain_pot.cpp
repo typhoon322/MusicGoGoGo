@@ -1,5 +1,7 @@
 #include "input/gain_pot.h"
 
+#if defined(BOARD_S3_DEV)
+
 #include <Arduino.h>
 #include <math.h>
 
@@ -31,3 +33,5 @@ void GainPot::poll() {
     lastRaw_ = raw;
   }
 }
+
+#endif  // BOARD_S3_DEV

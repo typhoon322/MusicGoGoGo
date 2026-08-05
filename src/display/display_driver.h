@@ -7,6 +7,17 @@
 #include "dsp/spectrum_analyzer.h"
 #include "vfx.h"
 
+#if defined(BOARD_CARDPUTER_ADV)
+struct MicDebugInfo {
+  int8_t batteryPercent = -1;
+  int16_t rawMin = 0;
+  int16_t rawMax = 0;
+  int32_t rawMean = 0;
+  float gain = 1.0f;
+  float bands[4] = {};
+};
+#endif
+
 class DisplayDriver {
  public:
   bool begin(uint8_t backlightLevel = 255);
@@ -20,12 +31,25 @@ class DisplayDriver {
   void nextMode();
   void prevMode();
 
+#if defined(BOARD_CARDPUTER_ADV)
+  void toggleDebugOverlay();
+  bool debugOverlay() const { return debugOverlay_; }
+#endif
+
   void render(const SpectrumFrame &spec, const float *smoothLevels, const float *peakLevels,
-              size_t bandCount, float rms, float peak);
+              size_t bandCount, float rms, float peak
+#if defined(BOARD_CARDPUTER_ADV)
+              ,
+              const MicDebugInfo &micDebug
+#endif
+  );
 
  private:
   bool initialized_ = false;
   uint8_t backlightLevel_ = 255;
+#if defined(BOARD_CARDPUTER_ADV)
+  bool debugOverlay_ = false;
+#endif
   VfxMode mode_ = VfxMode::Bars32;
   size_t waterfallHead_ = 0;
   float waterfallHistory_[VFX_WATERFALL_HISTORY * VFX_WATERFALL_BINS] = {};

@@ -1,36 +1,126 @@
 #include "display/vfx_renderer.h"
 
 #include <Arduino.h>
+#include <esp_heap_caps.h>
 #include <math.h>
 #include <string.h>
 
 #include "config.h"
+#include "display/tft_colors.h"
+
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+#define GFX (gfxOverride_ != nullptr ? gfxOverride_ : static_cast<lgfx::LovyanGFX *>(tft_))
+#else
+#define GFX tft_
+#endif
 
 namespace {
+#ifndef VFX_HEADER_H
 constexpr int kHeaderH = 24;
+#else
+constexpr int kHeaderH = VFX_HEADER_H;
+#endif
+#ifndef VFX_AREA_TOP
 constexpr int kAreaTop = 26;
+#else
+constexpr int kAreaTop = VFX_AREA_TOP;
+#endif
 constexpr int kAreaBottom = TFT_HEIGHT - 2;
 constexpr int kMarginL = 2;
 constexpr int kMarginR = 2;
-constexpr uint16_t kBg = ST77XX_BLACK;
-constexpr uint16_t kText = ST77XX_WHITE;
-constexpr uint16_t kAccent = ST77XX_CYAN;
+constexpr uint16_t kBg = TFT_COL_BLACK;
+constexpr uint16_t kText = TFT_COL_WHITE;
+constexpr uint16_t kAccent = TFT_COL_CYAN;
 constexpr uint16_t kGrid = 0x4208;
+
+struct SpectrumLayout {
+  int areaW = 0;
+  int gap = 0;
+  int barW = 0;
+  int extra = 0;
+};
+
+SpectrumLayout makeLayout(size_t count, int gap) {
+  SpectrumLayout layout;
+  layout.gap = gap;
+  layout.areaW = TFT_WIDTH - kMarginL - kMarginR;
+  if (count == 0) {
+    return layout;
+  }
+  layout.barW =
+      (layout.areaW - static_cast<int>(count - 1) * gap) / static_cast<int>(count);
+  const int used =
+      static_cast<int>(count) * layout.barW + static_cast<int>(count - 1) * gap;
+  layout.extra = layout.areaW - used;
+  return layout;
+}
+
+int barWidth(const SpectrumLayout &layout, size_t index) {
+  return layout.barW + (static_cast<int>(index) < layout.extra ? 1 : 0);
+}
+
+int barX(const SpectrumLayout &layout, size_t index) {
+  int x = kMarginL;
+  for (size_t j = 0; j < index; ++j) {
+    x += barWidth(layout, j) + layout.gap;
+  }
+  return x;
+}
 }  // namespace
 
-void VfxRenderer::attach(Adafruit_ST7789 *tft) {
+void VfxRenderer::attach(VfxTft *tft) {
   tft_ = tft;
   if (waterfallFb_ == nullptr) {
-    waterfallFb_ =
-        static_cast<uint16_t *>(ps_malloc(TFT_WIDTH * VFX_WATERFALL_HISTORY * sizeof(uint16_t)));
+    const size_t bytes = TFT_WIDTH * VFX_WATERFALL_HISTORY * sizeof(uint16_t);
+    waterfallFb_ = static_cast<uint16_t *>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM));
+    if (waterfallFb_ == nullptr) {
+      waterfallFb_ = static_cast<uint16_t *>(malloc(bytes));
+    }
     resetWaterfall();
   }
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  plotSpriteH_ = kAreaBottom - kAreaTop + 1;
+  if (plotSprite_ == nullptr) {
+    plotSprite_ = new lgfx::LGFX_Sprite(tft_);
+  }
+  if (plotSprite_ != nullptr) {
+    if (plotSprite_->width() != TFT_WIDTH || plotSprite_->height() != plotSpriteH_) {
+      plotSprite_->deleteSprite();
+      plotSprite_->createSprite(TFT_WIDTH, plotSpriteH_);
+    }
+  }
+#endif
 }
 
 void VfxRenderer::resetWaterfall() {
   if (waterfallFb_ != nullptr) {
     memset(waterfallFb_, 0, TFT_WIDTH * VFX_WATERFALL_HISTORY * sizeof(uint16_t));
   }
+}
+
+void VfxRenderer::resetHeaderCache() {
+  lastHeaderMode_ = VfxMode::Count;
+  lastHeaderVu_ = -1.0f;
+  lastHeaderPeak_ = -1.0f;
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  lastHeaderDrawMs_ = 0;
+  lastBatteryPercent_ = -1;
+  lastShowMicDebug_ = false;
+#endif
+}
+
+void VfxRenderer::resetBarCache() {
+  for (size_t i = 0; i < 64; ++i) {
+    prevBarH_[i] = -1;
+    prevPeakH_[i] = -1;
+  }
+}
+
+void VfxRenderer::clearPlotArea() {
+  if (tft_ == nullptr) {
+    return;
+  }
+  tft_->fillRect(0, kAreaTop, TFT_WIDTH, TFT_HEIGHT - kAreaTop, kBg);
 }
 
 uint16_t VfxRenderer::heatColor_(float level) const {
@@ -102,21 +192,45 @@ uint16_t VfxRenderer::rainbowColor_(float level, float hue) const {
 
 uint16_t VfxRenderer::gradientBarColor_(float level) const {
   if (level < 0.45f) {
-    return ST77XX_GREEN;
+    return TFT_COL_GREEN;
   }
   if (level < 0.75f) {
-    return ST77XX_YELLOW;
+    return TFT_COL_YELLOW;
   }
-  return ST77XX_RED;
+  return TFT_COL_RED;
 }
 
 void VfxRenderer::drawHeader_(const VfxDrawContext &ctx) {
   if (tft_ == nullptr) {
     return;
   }
+#if defined(BOARD_CARDPUTER_ADV)
+  if (ctx.mode == lastHeaderMode_ && ctx.batteryPercent == lastBatteryPercent_ &&
+      ctx.showMicDebug == lastShowMicDebug_ && ctx.frameMs - lastHeaderDrawMs_ < 1000) {
+    return;
+  }
+  lastHeaderDrawMs_ = ctx.frameMs;
+  lastBatteryPercent_ = ctx.batteryPercent;
+  lastShowMicDebug_ = ctx.showMicDebug;
+#else
+  if (ctx.mode == lastHeaderMode_ && fabsf(ctx.vu - lastHeaderVu_) < 0.02f &&
+      fabsf(ctx.peak - lastHeaderPeak_) < 0.02f) {
+    return;
+  }
+  lastHeaderVu_ = ctx.vu;
+  lastHeaderPeak_ = ctx.peak;
+#endif
+  lastHeaderMode_ = ctx.mode;
+
   tft_->fillRect(0, 0, TFT_WIDTH, kHeaderH, kBg);
-  tft_->setTextColor(kAccent);
   tft_->setTextSize(1);
+#if defined(BOARD_CARDPUTER_ADV)
+  tft_->setTextColor(kAccent);
+  tft_->setCursor(2, 3);
+  tft_->print(vfxModeName(ctx.mode));
+  drawBatteryBadge_(ctx);
+#else
+  tft_->setTextColor(kAccent);
   tft_->setCursor(4, 3);
   tft_->print(vfxModeName(ctx.mode));
   tft_->setTextColor(kText);
@@ -125,7 +239,56 @@ void VfxRenderer::drawHeader_(const VfxDrawContext &ctx) {
   tft_->print(ctx.vu, 2);
   tft_->print(F("  P "));
   tft_->print(ctx.peak, 2);
+#endif
 }
+
+#if defined(BOARD_CARDPUTER_ADV)
+void VfxRenderer::drawBatteryBadge_(const VfxDrawContext &ctx) {
+  if (tft_ == nullptr) {
+    return;
+  }
+
+  const int pct = ctx.batteryPercent < 0 ? 0 : ctx.batteryPercent;
+  const int pctClamped = pct > 100 ? 100 : pct;
+  const uint16_t fillColor =
+      pctClamped > 50 ? TFT_COL_GREEN : (pctClamped > 20 ? TFT_COL_YELLOW : TFT_COL_RED);
+
+  char label[8];
+  snprintf(label, sizeof(label), "%d%%", pctClamped);
+  const int labelW = static_cast<int>(strlen(label)) * 6;
+  const int badgeW = 22 + labelW;
+  const int x = TFT_WIDTH - badgeW - 2;
+  const int y = 4;
+
+  tft_->drawRect(x, y, 18, 10, kText);
+  tft_->fillRect(x + 18, y + 3, 2, 4, kText);
+  const int fillW = (pctClamped * 14) / 100;
+  if (fillW > 0) {
+    tft_->fillRect(x + 2, y + 2, fillW, 6, fillColor);
+  }
+
+  tft_->setTextColor(kText);
+  tft_->setCursor(x + 22, 3);
+  tft_->print(label);
+}
+
+void VfxRenderer::drawMicDebugOverlay_(const VfxDrawContext &ctx) {
+  constexpr int kOverlayH = 36;
+  constexpr uint16_t kPanel = 0x1082;
+
+  GFX->fillRect(0, 0, TFT_WIDTH, kOverlayH, kPanel);
+  GFX->drawFastHLine(0, kOverlayH - 1, TFT_WIDTH, kAccent);
+  GFX->setTextSize(1);
+  GFX->setTextColor(kText);
+  GFX->setCursor(2, 2);
+  GFX->printf("RMS %.3f  P %.3f  G %.1f", ctx.rms, ctx.peak, ctx.micGain);
+  GFX->setCursor(2, 12);
+  GFX->printf("raw[%d..%d] avg%ld", ctx.micRawMin, ctx.micRawMax,
+              static_cast<long>(ctx.micRawMean));
+  GFX->setCursor(2, 22);
+  GFX->printf("B0-3:%.2f %.2f %.2f %.2f", ctx.band0, ctx.band1, ctx.band2, ctx.band3);
+}
+#endif
 
 void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const float *peaks,
                             size_t count, bool gradient, float hueShift) {
@@ -133,18 +296,25 @@ void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const floa
     return;
   }
 
-  const int areaW = TFT_WIDTH - kMarginL - kMarginR;
   const int areaH = bottom - top;
+#if defined(BOARD_CARDPUTER_ADV)
+  const int gap = 1;
+#else
   const int gap = count > 24 ? 1 : 2;
-  const int barW = (areaW - static_cast<int>(count - 1) * gap) / static_cast<int>(count);
-  if (barW < 1) {
+#endif
+  const SpectrumLayout layout = makeLayout(count, gap);
+  if (layout.barW < 1) {
     return;
   }
+  const int areaW = layout.areaW;
 
-  tft_->drawFastHLine(kMarginL, bottom, areaW, kGrid);
+#if defined(BOARD_CARDPUTER_ADV)
+  GFX->fillRect(kMarginL, top, areaW, areaH, kBg);
+  GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
 
   for (size_t i = 0; i < count; ++i) {
-    const int x = kMarginL + static_cast<int>(i) * (barW + gap);
+    const int x = barX(layout, i);
+    const int bw = barWidth(layout, i);
     const float level = levels[i] > 1.0f ? 1.0f : levels[i];
     const float peak = peaks[i] > 1.0f ? 1.0f : peaks[i];
     int barH = static_cast<int>(level * static_cast<float>(areaH));
@@ -156,40 +326,104 @@ void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const floa
       peakH = areaH;
     }
 
-    tft_->fillRect(x, top, barW, areaH, kBg);
+    GFX->drawRect(x, top, bw, areaH, kGrid);
+    if (barH > 0) {
+      const int y = bottom - barH;
+      const uint16_t color =
+          gradient ? rainbowColor_(level, hueShift + static_cast<float>(i) * 0.04f)
+                   : gradientBarColor_(level);
+      GFX->fillRect(x, y, bw, barH, color);
+    }
+
+    if (peakH > barH + 1) {
+      const int py = bottom - peakH;
+      GFX->fillRect(x, py, bw, 2, TFT_COL_WHITE);
+    }
+  }
+#else
+  bool fullRedraw = false;
+  for (size_t i = 0; i < count; ++i) {
+    if (prevBarH_[i] < 0) {
+      fullRedraw = true;
+      break;
+    }
+    const float level = levels[i] > 1.0f ? 1.0f : levels[i];
+    const float peak = peaks[i] > 1.0f ? 1.0f : peaks[i];
+    int barH = static_cast<int>(level * static_cast<float>(areaH));
+    int peakH = static_cast<int>(peak * static_cast<float>(areaH));
+    if (barH > areaH) {
+      barH = areaH;
+    }
+    if (peakH > areaH) {
+      peakH = areaH;
+    }
+    if (abs(barH - prevBarH_[i]) > 1 || abs(peakH - prevPeakH_[i]) > 1) {
+      fullRedraw = true;
+      break;
+    }
+  }
+
+  if (fullRedraw) {
+    GFX->fillRect(kMarginL, top, areaW, areaH, kBg);
+    GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    const int x = barX(layout, i);
+    const int bw = barWidth(layout, i);
+    const float level = levels[i] > 1.0f ? 1.0f : levels[i];
+    const float peak = peaks[i] > 1.0f ? 1.0f : peaks[i];
+    int barH = static_cast<int>(level * static_cast<float>(areaH));
+    int peakH = static_cast<int>(peak * static_cast<float>(areaH));
+    if (barH > areaH) {
+      barH = areaH;
+    }
+    if (peakH > areaH) {
+      peakH = areaH;
+    }
+
+    if (!fullRedraw && barH == prevBarH_[i] && peakH == prevPeakH_[i]) {
+      continue;
+    }
+
+    GFX->fillRect(x, top, bw, areaH, kBg);
 
     if (barH > 0) {
       const int y = bottom - barH;
       const uint16_t color =
           gradient ? rainbowColor_(level, hueShift + static_cast<float>(i) * 0.04f)
                    : gradientBarColor_(level);
-      tft_->fillRect(x, y, barW, barH, color);
+      GFX->fillRect(x, y, bw, barH, color);
     }
 
     if (peakH > barH + 1) {
       const int py = bottom - peakH;
-      tft_->fillRect(x, py, barW, 2, ST77XX_WHITE);
+      GFX->fillRect(x, py, bw, 2, TFT_COL_WHITE);
     }
+
+    prevBarH_[i] = barH;
+    prevPeakH_[i] = peakH;
   }
+#endif
 }
 
 void VfxRenderer::drawMirror_(int top, int bottom, const float *levels, const float *peaks,
                               size_t count) {
-  if (tft_ == nullptr || levels == nullptr || count == 0) {
+  if (tft_ == nullptr || levels == nullptr || peaks == nullptr || count == 0) {
     return;
   }
 
   const int midY = (top + bottom) / 2;
   const int halfH = (bottom - top) / 2 - 2;
-  const int areaW = TFT_WIDTH - kMarginL - kMarginR;
-  const int gap = 1;
-  const int barW = (areaW - static_cast<int>(count - 1) * gap) / static_cast<int>(count);
+  const SpectrumLayout layout = makeLayout(count, 1);
+  const int areaW = layout.areaW;
 
-  tft_->fillRect(kMarginL, top, areaW, bottom - top, kBg);
-  tft_->drawFastHLine(kMarginL, midY, areaW, kAccent);
+  GFX->fillRect(kMarginL, top, areaW, bottom - top, kBg);
+  GFX->drawFastHLine(kMarginL, midY, areaW, kAccent);
 
   for (size_t i = 0; i < count; ++i) {
-    const int x = kMarginL + static_cast<int>(i) * (barW + gap);
+    const int x = barX(layout, i);
+    const int bw = barWidth(layout, i);
     const float level = levels[i] > 1.0f ? 1.0f : levels[i];
     const float peak = peaks[i] > 1.0f ? 1.0f : peaks[i];
     int barH = static_cast<int>(level * static_cast<float>(halfH));
@@ -202,13 +436,14 @@ void VfxRenderer::drawMirror_(int top, int bottom, const float *levels, const fl
     }
 
     const uint16_t color = rainbowColor_(level, static_cast<float>(i) * 0.03f);
+    GFX->drawRect(x, top, bw, bottom - top, kGrid);
     if (barH > 0) {
-      tft_->fillRect(x, midY - barH, barW, barH, color);
-      tft_->fillRect(x, midY + 1, barW, barH, color);
+      GFX->fillRect(x, midY - barH, bw, barH, color);
+      GFX->fillRect(x, midY + 1, bw, barH, color);
     }
     if (peakH > barH + 1) {
-      tft_->fillRect(x, midY - peakH, barW, 1, ST77XX_WHITE);
-      tft_->fillRect(x, midY + peakH, barW, 1, ST77XX_WHITE);
+      GFX->fillRect(x, midY - peakH, bw, 1, TFT_COL_WHITE);
+      GFX->fillRect(x, midY + peakH, bw, 1, TFT_COL_WHITE);
     }
   }
 }
@@ -224,28 +459,64 @@ void VfxRenderer::drawVu_(int top, int bottom, const VfxDrawContext &ctx, const 
   const int vuY = top + 8;
   const int segGap = 2;
   const int segCount = 24;
-  const int segW = (areaW - (segCount - 1) * segGap) / segCount;
+  const SpectrumLayout segLayout = makeLayout(static_cast<size_t>(segCount), segGap);
 
-  tft_->fillRect(kMarginL, top, areaW, bottom - top, kBg);
+  GFX->fillRect(kMarginL, top, areaW, bottom - top, kBg);
 
   for (int i = 0; i < segCount; ++i) {
-    const int x = kMarginL + i * (segW + segGap);
+    const int x = barX(segLayout, static_cast<size_t>(i));
+    const int segW = barWidth(segLayout, static_cast<size_t>(i));
     const float threshold = static_cast<float>(i + 1) / static_cast<float>(segCount);
     uint16_t color = 0x0400;
     if (threshold <= ctx.vu) {
       if (i < segCount * 6 / 10) {
-        color = ST77XX_GREEN;
+        color = TFT_COL_GREEN;
       } else if (i < segCount * 85 / 100) {
-        color = ST77XX_YELLOW;
+        color = TFT_COL_YELLOW;
       } else {
-        color = ST77XX_RED;
+        color = TFT_COL_RED;
       }
     }
-    tft_->fillRect(x, vuY, segW, vuH, color);
+    GFX->fillRect(x, vuY, segW, vuH, color);
   }
 
   drawBars_(vuY + vuH + 10, bottom, levels, levels, count > 16 ? 16 : count, true, 0.0f);
 }
+
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+void VfxRenderer::drawPlotMode_(const VfxDrawContext &ctx, VfxMode mode, const float *levels,
+                                const float *peaks, size_t count, float *waterfallHistory,
+                                size_t &waterfallHead) {
+  switch (mode) {
+    case VfxMode::Bars32:
+      drawBars_(0, plotSpriteH_ - 1, levels, peaks, count, false, 0.0f);
+      break;
+    case VfxMode::Log12:
+      drawBars_(0, plotSpriteH_ - 1, levels, peaks, count, false, 0.0f);
+      break;
+    case VfxMode::Mirror:
+      drawMirror_(0, plotSpriteH_ - 1, levels, peaks, count);
+      break;
+    case VfxMode::VuMeter:
+      drawVu_(0, plotSpriteH_ - 1, ctx, levels, count);
+      break;
+    case VfxMode::Waterfall:
+      drawWaterfall_(0, plotSpriteH_ - 1, levels, waterfallHistory, waterfallHead);
+      break;
+    case VfxMode::Rainbow: {
+      const float hue = fmodf(static_cast<float>(ctx.frameMs) * 0.00008f, 1.0f);
+      drawBars_(0, plotSpriteH_ - 1, levels, peaks, count, true, hue);
+      break;
+    }
+    case VfxMode::LinePeaks:
+      drawLinePeaks_(0, plotSpriteH_ - 1, levels, count);
+      break;
+    default:
+      drawBars_(0, plotSpriteH_ - 1, levels, peaks, count, false, 0.0f);
+      break;
+  }
+}
+#endif
 
 void VfxRenderer::drawWaterfall_(int top, int bottom, const float *row, float *history,
                                size_t &head) {
@@ -255,8 +526,8 @@ void VfxRenderer::drawWaterfall_(int top, int bottom, const float *row, float *h
 
   const int areaH = bottom - top;
   const int rows = areaH < VFX_WATERFALL_HISTORY ? areaH : VFX_WATERFALL_HISTORY;
-  const int binW = TFT_WIDTH / VFX_WATERFALL_BINS;
-  if (binW < 1) {
+  const int areaW = TFT_WIDTH - kMarginL - kMarginR;
+  if (areaW < 1 || rows < 1) {
     return;
   }
 
@@ -267,16 +538,27 @@ void VfxRenderer::drawWaterfall_(int top, int bottom, const float *row, float *h
 
   for (int y = 0; y < rows; ++y) {
     const size_t srcRow = (head + static_cast<size_t>(y)) % static_cast<size_t>(rows);
-    for (size_t x = 0; x < VFX_WATERFALL_BINS; ++x) {
-      const float level = history[srcRow * VFX_WATERFALL_BINS + x];
-      const uint16_t color = heatColor_(level);
-      for (int dx = 0; dx < binW; ++dx) {
-        waterfallFb_[static_cast<size_t>(y) * TFT_WIDTH + x * binW + dx] = color;
+    for (int px = 0; px < areaW; ++px) {
+      size_t bin = static_cast<size_t>(px) * VFX_WATERFALL_BINS / static_cast<size_t>(areaW);
+      if (bin >= VFX_WATERFALL_BINS) {
+        bin = VFX_WATERFALL_BINS - 1;
       }
+      const float level = history[srcRow * VFX_WATERFALL_BINS + bin];
+      waterfallFb_[static_cast<size_t>(y) * TFT_WIDTH + kMarginL + px] = heatColor_(level);
+    }
+    for (int px = 0; px < kMarginL; ++px) {
+      waterfallFb_[static_cast<size_t>(y) * TFT_WIDTH + px] = kBg;
+    }
+    for (int px = kMarginL + areaW; px < TFT_WIDTH; ++px) {
+      waterfallFb_[static_cast<size_t>(y) * TFT_WIDTH + px] = kBg;
     }
   }
 
-  tft_->drawRGBBitmap(0, top, waterfallFb_, TFT_WIDTH, rows);
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  GFX->pushImage(0, top, TFT_WIDTH, rows, waterfallFb_);
+#else
+  GFX->drawRGBBitmap(0, top, waterfallFb_, TFT_WIDTH, rows);
+#endif
 }
 
 void VfxRenderer::drawLinePeaks_(int top, int bottom, const float *levels, size_t count) {
@@ -286,8 +568,8 @@ void VfxRenderer::drawLinePeaks_(int top, int bottom, const float *levels, size_
 
   const int areaW = TFT_WIDTH - kMarginL - kMarginR;
   const int areaH = bottom - top;
-  tft_->fillRect(kMarginL, top, areaW, areaH, kBg);
-  tft_->drawFastHLine(kMarginL, bottom, areaW, kGrid);
+  GFX->fillRect(kMarginL, top, areaW, areaH, kBg);
+  GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
 
   int prevX = -1;
   int prevY = -1;
@@ -296,9 +578,9 @@ void VfxRenderer::drawLinePeaks_(int top, int bottom, const float *levels, size_
     const int x = kMarginL + static_cast<int>(i * areaW / (count - 1));
     const int y = bottom - static_cast<int>(level * static_cast<float>(areaH));
     const uint16_t color = rainbowColor_(level, static_cast<float>(i) * 0.02f);
-    tft_->fillCircle(x, y, 2, color);
+    GFX->fillCircle(x, y, 2, color);
     if (prevX >= 0) {
-      tft_->drawLine(prevX, prevY, x, y, color);
+      GFX->drawLine(prevX, prevY, x, y, color);
     }
     prevX = x;
     prevY = y;
@@ -313,6 +595,22 @@ void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *lev
   }
 
   drawHeader_(ctx);
+
+#if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
+  if (plotSprite_ != nullptr && plotSprite_->width() > 0) {
+    plotSprite_->fillScreen(kBg);
+    gfxOverride_ = plotSprite_;
+    drawPlotMode_(ctx, mode, levels, peaks, count, waterfallHistory, waterfallHead);
+    if (ctx.showMicDebug) {
+      drawMicDebugOverlay_(ctx);
+    }
+    gfxOverride_ = nullptr;
+    tft_->startWrite();
+    plotSprite_->pushSprite(0, kAreaTop);
+    tft_->endWrite();
+    return;
+  }
+#endif
 
   switch (mode) {
     case VfxMode::Bars32:

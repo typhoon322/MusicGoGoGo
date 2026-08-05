@@ -1,5 +1,7 @@
 #include "input/rotary_encoder.h"
 
+#if defined(BOARD_S3_DEV)
+
 #include <Arduino.h>
 
 #include "config.h"
@@ -61,3 +63,5 @@ bool RotaryEncoder::consumePress() {
   }
   return false;
 }
+
+#endif  // BOARD_S3_DEV

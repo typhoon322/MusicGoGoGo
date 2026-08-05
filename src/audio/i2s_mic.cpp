@@ -1,5 +1,7 @@
 #include "audio/i2s_mic.h"
 
+#if defined(BOARD_S3_DEV)
+
 #include <Arduino.h>
 #include <driver/i2s.h>
 #include <math.h>
@@ -109,3 +111,5 @@ bool I2sMic::readSamples(int16_t *out, size_t count) {
   lastRms_ = static_cast<float>(sqrt(sumSq / static_cast<double>(count))) / 32768.0f;
   return true;
 }
+
+#endif  // BOARD_S3_DEV

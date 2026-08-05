@@ -166,3 +166,132 @@ pio run -e esp32-s3-dev -t upload
 - TFT VCC **不得**接 5V
 - INMP441 VDD **不得**接 5V
 - ESP32 GND 与所有模块 GND 必须共地
+
+---
+
+## Cardputer ADV 验证
+
+在未焊接 S3 硬件前，可用 **M5Stack Cardputer ADV** 验证麦克风、FFT 与 VFX。
+
+完整说明见 **[docs/cardputer-adv.md](cardputer-adv.md)**。
+
+```bash
+pio run -e cardputer-adv -t upload
+pio device monitor
+```
+
+### 当前默认：内置屏 + 内置麦
+
+[`board_cardputer_adv.h`](../include/boards/board_cardputer_adv.h) 中 `CARDPUTER_USE_BUILTIN_LCD 1`：
+
+- 显示：机身 ST7789，横屏 **240×135**（M5GFX）
+- 麦克风：ES8311（M5Cardputer 库）
+- 渲染：离屏 Sprite 整帧推送，避免撕裂斜纹
+
+设为 `0` 则改用 EXT 14P 外接 2.4" ST7789（见下文）。
+
+### 操作（Cardputer）
+
+| 输入 | 功能 |
+|------|------|
+| **BtnA 短按** | 下一个 VFX |
+| **BtnA 长按**（约 0.6 s） | 开关 mic 调试浮层 |
+| `d` | 开关调试浮层 |
+| `,` / `;` | 上一个 VFX |
+| `.` / `:` | 下一个 VFX |
+| `[` / `]` | 降低 / 提高麦克风增益 |
+| 顶栏右上 | 电池电量 % |
+| 串口 `n` / `p` / `+` / `-` | 备用控制 |
+
+Cardputer 固件 **默认关闭自动轮播**。
+
+### SD 卡安装（可选）
+
+编译 `cardputer-adv` 后，`launcher/MusicGoGoGo.bin` 自动更新。拷到 SD 卡根目录 → M5Launcher → SD → Install。
+
+---
+
+## Cardputer ADV — 外接 ST7789（EXT 14P）
+
+当 `CARDPUTER_USE_BUILTIN_LCD 0` 时使用此外接方案。
+
+### EXT 14P → ST7789
+
+| TFT 模块 | Cardputer GPIO | EXT 排针 | 说明 |
+|----------|----------------|----------|------|
+| VCC | **5V IN** | **pin 2** | EXT 标注为 5V IN；多数 2.4" 模块板载 LDO 可接此脚；**仅 3.3V 模块勿接** |
+| GND | GND | pin 4 | 共地 |
+| SCK | 40 | pin 7 | SPI 时钟 |
+| MOSI / SDI | 14 | pin 9 | SPI 数据 |
+| CS | 5 | pin 13 | 片选 |
+| DC / RS | 6 | pin 5 | 数据/命令 |
+| RESET | 3 | pin 1 | 复位 |
+| BL | 15 | pin 14 | 背光（高电平亮） |
+| MISO | — | — | 4-wire SPI 不接 |
+
+### EXT 14P 按 pin 顺序（接 ST7789）
+
+排针为 **2×7**（两排横针）。Cardputer ADV 丝印与 [M5 官方 PinMap](https://docs.m5stack.com/en/core/Cardputer-Adv) 一致：
+
+- **上排** = 奇数 pin（1、3、5 … 13）→ 丝印 **G3、G4、G6 …**
+- **下排** = 偶数 pin（2、4、6 … 14）→ 丝印 **5V IN、GND、5VOUT …**
+
+> 以前写「左列 / 右列」容易和丝印对不上；以 **上排 / 下排** 为准。  
+> **G3 = pin 1 = 上排最左侧**，不在下排。
+
+面向 EXT 口（屏幕朝你、键盘在远端），从左到右：
+
+| Pin | 排 | 丝印 / GPIO | 官方功能 | 接 ST7789 |
+|-----|----|-------------|----------|-----------|
+| 1 | **上** | G3 | RESET | **RESET** |
+| 2 | **下** | 5V IN | 5VIN | **VCC** |
+| 3 | **上** | G4 | INT | 不接 |
+| 4 | **下** | GND | GND | **GND** |
+| 5 | **上** | G6 | BUSY | **DC / RS** |
+| 6 | **下** | 5VOUT | 5V 输出 | 不接 |
+| 7 | **上** | G40 | SCK | **SCK**（屏上常标 **SCL** / CLK） |
+| 8 | **下** | G8 | I2C_SDA | 不接 |
+| 9 | **上** | G14 | MOSI | **SDI / MOSI**（屏上常标 **SDA**） |
+| 10 | **下** | G9 | I2C_SCL | 不接 |
+| 11 | **上** | G39 | MISO | 不接（4-wire SPI） |
+| 12 | **下** | G13 | UART_RX | 不接 |
+| 13 | **上** | G5 | CS | **CS** |
+| 14 | **下** | G15 | UART_TX | **BL**（背光） |
+
+```
+EXT 14P → ST7789（上排 = 奇数 pin，下排 = 偶数 pin；● = 要接）
+
+        ←──────────── 靠近屏幕侧 ────────────→
+
+上排  G3      G4      G6      G40     G14     G39     G5
+pin   1       3       5       7       9       11      13
+      ●       ·       ●       ●       ●       ·       ●
+      RESET           DC      SCK     MOSI            CS
+
+下排  5V IN   GND     5VOUT   G8      G9      G13     G15
+pin   2       4       6       8       10      12      14
+      ●       ●       ·       ·       ·       ·       ●
+      VCC     GND                                     BL
+
+共 8 线：上排 RESET / DC / SCK / MOSI / CS；下排 VCC / GND / BL
+```
+
+> 屏模块若印 **SCL / SDA**，在 4-wire SPI 模式下分别接 **SCK / MOSI**（不是 EXT 下排的 I2C G8/G9）。
+
+```
+Cardputer EXT                     ST7789 2.4"
+─────────────                     ────────────
+pin 2  5V IN ───────────────────→ VCC
+pin 4  GND  ───────────────────→ GND
+pin 7  G40  ───────────────────→ SCK
+pin 9  G14  ───────────────────→ SDI / MOSI
+pin 13 G5   ───────────────────→ CS
+pin 5  G6   ───────────────────→ DC
+pin 1  G3   ───────────────────→ RESET
+pin 14 G15  ───────────────────→ BL
+```
+
+> EXT SPI 与 microSD 共用 40/14 总线；外接 CS 用 GPIO5，与 SD 片选 GPIO12 不冲突。  
+> **pin 2 = 5V IN**（EXT 丝印），由 Cardputer 供电链路提供；SPI 信号仍为 3.3V 逻辑。
+
+若使用内置屏验证，**无需接 EXT 屏**；见 [cardputer-adv.md](cardputer-adv.md)。
