@@ -38,7 +38,7 @@ pio run -e cardputer-adv -t upload
 pio device monitor
 ```
 
-详见 [docs/cardputer-adv.md](docs/cardputer-adv.md)。编译产物可复制到 SD 卡经 M5Launcher 安装。
+详见 [docs/cardputer-adv.md](docs/cardputer-adv.md)。编译后 bin 自动复制到 `launcher/` 与 `~/ESP32/M5StackBin/`，可拷到 SD 卡经 M5Launcher 安装。
 
 ## 操作
 
@@ -79,7 +79,7 @@ pio device monitor
 MusicGoGoGo/
 ├── platformio.ini          # esp32-s3-dev / cardputer-adv
 ├── scripts/copy_launcher_bin.py
-├── launcher/               # cardputer-adv 编译产物（.bin 已 gitignore）
+├── launcher/               # cardputer-adv → MusicGoGoGo.bin（及 ~/ESP32/M5StackBin/）
 ├── src/
 │   ├── main.cpp
 │   ├── audio/

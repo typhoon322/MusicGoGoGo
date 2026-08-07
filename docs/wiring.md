@@ -207,7 +207,12 @@ Cardputer 固件 **默认关闭自动轮播**。
 
 ### SD 卡安装（可选）
 
-编译 `cardputer-adv` 后，`launcher/MusicGoGoGo.bin` 自动更新。拷到 SD 卡根目录 → M5Launcher → SD → Install。
+编译 `cardputer-adv` 后自动复制 `MusicGoGoGo.bin` 到：
+
+- `launcher/MusicGoGoGo.bin`（项目内）
+- `/Users/yanx/ESP32/M5StackBin/MusicGoGoGo.bin`（本机固件汇总）
+
+拷到 SD 卡根目录 → M5Launcher → SD → Install。
 
 ---
 

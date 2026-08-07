@@ -18,7 +18,14 @@ pio device monitor
 | 串口 | USB CDC，115200 |
 | 板型宏 | `BOARD_CARDPUTER_ADV` |
 
-编译成功后，固件会自动复制到 [`launcher/`](../launcher/) 下的 `MusicGoGoGo.bin`（由 `scripts/copy_launcher_bin.py` 完成）。可将该文件拷到 SD 卡根目录，在 Cardputer 的 **M5Launcher → SD → Install** 安装。
+编译成功后，固件会自动复制到两处（由 [`scripts/copy_launcher_bin.py`](../scripts/copy_launcher_bin.py) 完成）：
+
+| 路径 | 用途 |
+|------|------|
+| [`launcher/MusicGoGoGo.bin`](../launcher/) | 项目内，便于拷到 SD 卡 |
+| `~/ESP32/M5StackBin/MusicGoGoGo.bin` | 本机 M5 固件汇总目录（绝对路径示例：`/Users/yanx/ESP32/M5StackBin`） |
+
+SD 卡安装：将 `MusicGoGoGo.bin` 拷到 SD 卡根目录 → Cardputer **M5Launcher → SD → Install**。
 
 ## 显示模式切换
 
