@@ -34,6 +34,7 @@ constexpr uint16_t kAccent = TFT_COL_CYAN;
 constexpr uint16_t kGrid = 0x4208;
 
 struct SpectrumLayout {
+  int startX = kMarginL;
   int areaW = 0;
   int gap = 0;
   int barW = 0;
@@ -42,6 +43,7 @@ struct SpectrumLayout {
 
 SpectrumLayout makeLayout(size_t count, int gap) {
   SpectrumLayout layout;
+  layout.startX = kMarginL;
   layout.gap = gap;
   layout.areaW = TFT_WIDTH - kMarginL - kMarginR;
   if (count == 0) {
@@ -55,27 +57,42 @@ SpectrumLayout makeLayout(size_t count, int gap) {
   return layout;
 }
 
+// 30-band / Log12: fill width; prefer 3px gaps (Cardputer keeps 0 for density).
+SpectrumLayout makeBarLayout(size_t count) {
+#if defined(BOARD_CARDPUTER_ADV)
+  return makeLayout(count, 0);
+#else
+  return makeLayout(count, 3);
+#endif
+}
+
 int barWidth(const SpectrumLayout &layout, size_t index) {
   return layout.barW + (static_cast<int>(index) < layout.extra ? 1 : 0);
 }
 
 int barX(const SpectrumLayout &layout, size_t index) {
-  int x = kMarginL;
+  int x = layout.startX;
   for (size_t j = 0; j < index; ++j) {
     x += barWidth(layout, j) + layout.gap;
   }
   return x;
 }
 
-// Center frequency (Hz) of bar `index` for a linear (Bars) or log (Log12) layout.
+// Center frequency (Hz) for 30-band 1/3-octave or 12-band octave layouts.
 float barCenterHz(size_t index, size_t count) {
-  if (count == static_cast<size_t>(VFX_LOG_BANDS)) {
-    const float minHz = 60.0f;
-    const float maxHz = static_cast<float>(I2S_SAMPLE_RATE) * 0.48f;
-    const float lo = minHz * powf(maxHz / minHz, static_cast<float>(index) / static_cast<float>(count));
-    const float hi =
-        minHz * powf(maxHz / minHz, static_cast<float>(index + 1) / static_cast<float>(count));
-    return sqrtf(lo * hi);
+  static const float kOctave12[] = {20.0f,   40.0f,    80.0f,    160.0f,   315.0f, 630.0f,
+                                    1250.0f, 2500.0f,  5000.0f,  8000.0f, 12000.0f,
+                                    16000.0f, 20000.0f};
+  static const float kThird30[] = {
+      20.0f,    25.0f,    31.0f,    40.0f,    50.0f,    63.0f,    80.0f,    100.0f,
+      125.0f,   160.0f,   200.0f,   250.0f,   315.0f,   400.0f,   500.0f,   630.0f,
+      800.0f,   1000.0f,  1250.0f,  1600.0f,  2000.0f,  2500.0f,  3150.0f,  4000.0f,
+      5000.0f,  6300.0f,  8000.0f,  10000.0f, 12500.0f, 16000.0f, 20000.0f};
+  if (count == SPECTRUM_BARS && index < SPECTRUM_BARS) {
+    return sqrtf(kThird30[index] * kThird30[index + 1]);
+  }
+  if (count == static_cast<size_t>(VFX_LOG_BANDS) && index < VFX_LOG_BANDS) {
+    return sqrtf(kOctave12[index] * kOctave12[index + 1]);
   }
   const float binW = static_cast<float>(I2S_SAMPLE_RATE) / static_cast<float>(FFT_SIZE);
   const float lo = 4.0f + static_cast<float>(index * (FFT_SIZE / 2)) / static_cast<float>(count);
@@ -156,10 +173,20 @@ void VfxRenderer::resetBarCache() {
 }
 
 void VfxRenderer::setShowFreqLabels(bool on) {
-  if (showFreqLabels_ == on) {
+  // Async WebUI may call this off the render task — defer clear/reset to draw().
+  pendingFreqLabels_ = on;
+  pendingFreqLabelsDirty_ = true;
+}
+
+void VfxRenderer::applyPendingFreqLabels_() {
+  if (!pendingFreqLabelsDirty_) {
     return;
   }
-  showFreqLabels_ = on;
+  pendingFreqLabelsDirty_ = false;
+  if (showFreqLabels_ == pendingFreqLabels_) {
+    return;
+  }
+  showFreqLabels_ = pendingFreqLabels_;
   clearPlotArea();
   resetBarCache();
 }
@@ -351,23 +378,20 @@ void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const floa
   }
 
   const int areaH = bottom - top;
-  (void)areaH;  // used in the Cardputer branch below
-#if defined(BOARD_CARDPUTER_ADV)
-  const int gap = 0;
-#else
-  const int gap = 3;
+  (void)areaH;
+#if !defined(BOARD_CARDPUTER_ADV)
   constexpr int kBarLabelH = 26;
   const int barBottom = showFreqLabels_ ? (bottom - kBarLabelH) : bottom;
 #endif
-  const SpectrumLayout layout = makeLayout(count, gap);
+  const SpectrumLayout layout = makeBarLayout(count);
   if (layout.barW < 1) {
     return;
   }
   const int areaW = layout.areaW;
 
 #if defined(BOARD_CARDPUTER_ADV)
-    GFX->fillRect(kMarginL, top, areaW, areaH, kBg);
-    GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
+    GFX->fillRect(layout.startX, top, areaW, areaH, kBg);
+    GFX->drawFastHLine(layout.startX, bottom, areaW, kGrid);
 
   for (size_t i = 0; i < count; ++i) {
     const int x = barX(layout, i);
@@ -403,13 +427,13 @@ void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const floa
   }
 #else
   const int barAreaH = barBottom - top;
-  GFX->drawFastHLine(kMarginL, barBottom, areaW, kGrid);
+  GFX->drawFastHLine(layout.startX, barBottom, areaW, kGrid);
 
   // Vertical frequency labels, one per bar. Redraw only when the bar count
   // changes (i.e. mode switch); bars never cover the label strip below them.
   if (showFreqLabels_ && lastBarLabelCount_ != static_cast<int>(count)) {
     lastBarLabelCount_ = static_cast<int>(count);
-    GFX->fillRect(kMarginL, barBottom + 1, areaW, bottom - barBottom - 1, kBg);
+    GFX->fillRect(layout.startX, barBottom + 1, areaW, bottom - barBottom - 1, kBg);
     char label[6];
     for (size_t i = 0; i < count; ++i) {
       const int x = barX(layout, i);
@@ -478,8 +502,10 @@ void VfxRenderer::drawMirror_(int top, int bottom, const float *levels, const fl
 
   const int midY = (top + bottom) / 2;
   const int halfH = (bottom - top) / 2 - 2;
-  const SpectrumLayout layout = makeLayout(count, 0);
-  const int areaW = layout.areaW;
+  const SpectrumLayout layout = makeBarLayout(count);
+  if (layout.barW < 1) {
+    return;
+  }
 
   for (size_t i = 0; i < count; ++i) {
     const int x = barX(layout, i);
@@ -592,9 +618,6 @@ void VfxRenderer::drawPlotMode_(const VfxDrawContext &ctx, VfxMode mode, const f
       break;
     case VfxMode::VuMeter:
       drawVu_(0, plotSpriteH_ - 1, ctx, levels, count);
-      break;
-    case VfxMode::Waterfall:
-      drawWaterfall_(0, plotSpriteH_ - 1, levels, waterfallHistory, waterfallHead);
       break;
     case VfxMode::Rainbow: {
       const float hue = fmodf(static_cast<float>(ctx.frameMs) * 0.00008f, 1.0f);
@@ -725,12 +748,7 @@ void VfxRenderer::drawBounce_(int top, int bottom, const float *levels, const fl
   if (tft_ == nullptr || levels == nullptr || peaks == nullptr || count == 0) {
     return;
   }
-#if defined(BOARD_CARDPUTER_ADV)
-  const int gap = 0;
-#else
-  const int gap = 3;
-#endif
-  const SpectrumLayout layout = makeLayout(count, gap);
+  const SpectrumLayout layout = makeBarLayout(count);
   if (layout.barW < 1) {
     return;
   }
@@ -817,16 +835,12 @@ void VfxRenderer::drawGlow_(int top, int bottom, const float *levels, const floa
   if (tft_ == nullptr || levels == nullptr || peaks == nullptr || count == 0) {
     return;
   }
-#if defined(BOARD_CARDPUTER_ADV)
-  const int gap = 0;
-#else
-  const int gap = 3;
-#endif
-  const SpectrumLayout layout = makeLayout(count, gap);
+  const SpectrumLayout layout = makeBarLayout(count);
   if (layout.barW < 1) {
     return;
   }
   const int areaH = bottom - top;
+  constexpr int kGlowExtra = 6;
   for (size_t i = 0; i < count; ++i) {
     const int x = barX(layout, i);
     const int bw = barWidth(layout, i);
@@ -843,17 +857,25 @@ void VfxRenderer::drawGlow_(int top, int bottom, const float *levels, const floa
     const uint16_t color = rainbowColor_(
         0.9f, 0.80f * (static_cast<float>(i) / static_cast<float>(count > 1 ? count - 1 : 1)));
     const int prevH = prevBarH_[i];
-    const int glowExtra = 8;
+
     if (prevH < 0) {
       GFX->fillRect(x, top, bw, areaH, kBg);
-    } else {
-      const int eraseTop = bottom - prevH - glowExtra;
-      if (eraseTop < top) {
-        GFX->fillRect(x, top, bw, areaH, kBg);
+    } else if (barH > prevH) {
+      GFX->fillRect(x, bottom - barH, bw, barH - prevH, color);
+      const int clearY = bottom - barH - kGlowExtra;
+      if (clearY >= top) {
+        GFX->fillRect(x, clearY, bw, (bottom - prevH) - clearY, kBg);
+      }
+    } else if (barH < prevH) {
+      const int eraseY = bottom - prevH - kGlowExtra;
+      const int eraseH = prevH - barH + kGlowExtra;
+      if (eraseY < top) {
+        GFX->fillRect(x, top, bw, bottom - top - barH, kBg);
       } else {
-        GFX->fillRect(x, eraseTop, bw, prevH + glowExtra, kBg);
+        GFX->fillRect(x, eraseY, bw, eraseH, kBg);
       }
     }
+
     if (barH > 0) {
       GFX->fillRect(x, bottom - barH, bw, barH, color);
       for (int k = 1; k <= 3; ++k) {
@@ -863,6 +885,10 @@ void VfxRenderer::drawGlow_(int top, int bottom, const float *levels, const floa
         }
         GFX->fillRect(x, tipY, bw, 2, darken_(color, 1.0f - 0.22f * static_cast<float>(k)));
       }
+    }
+
+    if (prevPeakH_[i] > barH + 4) {
+      GFX->fillRect(x, bottom - prevPeakH_[i], bw, 1, kBg);
     }
     if (peakH > barH + 4) {
       GFX->fillRect(x, bottom - peakH, bw, 1, TFT_COL_WHITE);
@@ -917,6 +943,7 @@ void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *lev
     return;
   }
 
+  applyPendingFreqLabels_();
   drawHeader_(ctx);
 
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
@@ -944,16 +971,11 @@ void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *lev
     areaInit_ = true;
   }
 
-  // drawRGBBitmap() issues its own startWrite/endWrite, so keep the
-  // waterfall on a separate (unwrapped) path to avoid nested transactions.
-  if (mode == VfxMode::Waterfall) {
-    drawWaterfall_(kAreaTop, kAreaBottom, levels, waterfallHistory, waterfallHead);
-    return;
-  }
-
   // Adafruit primitives (fillRect/drawFastHLine/...) manage their own SPI
   // transactions, so do NOT wrap them in an outer startWrite/endWrite —
   // nesting would re-lock the non-recursive SPI mutex and deadlock.
+  (void)waterfallHistory;
+  (void)waterfallHead;
   switch (mode) {
     case VfxMode::Bars32:
       drawBars_(kAreaTop, kAreaBottom, levels, peaks, count, false, 0.0f);

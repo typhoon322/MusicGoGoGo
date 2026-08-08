@@ -6,11 +6,10 @@
 // Visual effect modes (参考 redchenjs / ESP32-AudioInI2S / G6EJD 常见效果)
 
 enum class VfxMode : uint8_t {
-  Bars32 = 0,    // 32 柱线性 + 渐变 + peak 点
-  Log12,         // 12 段对数频谱
+  Bars32 = 0,    // 30 段 1/3 倍频程柱 + peak
+  Log12,         // 12 段倍频程柱（保留）
   Mirror,        // 中心对称镜面频谱
   VuMeter,       // VU 电平表 + 迷你频谱
-  Waterfall,     // 瀑布图 / 频谱图
   Rainbow,       // 彩虹色柱 + 色相滚动
   LinePeaks,     // 折线峰值
   Bounce,        // 弹性柱 + 弹簧 peak

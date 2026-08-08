@@ -33,6 +33,13 @@ struct WebCallbacks {
   bool (*getFreqLabels)() = nullptr;
   void (*setFreqLabels)(bool) = nullptr;
 
+  float (*getBassGain)() = nullptr;
+  void (*setBassGain)(float) = nullptr;
+  float (*getMidGain)() = nullptr;
+  void (*setMidGain)(float) = nullptr;
+  float (*getTrebleGain)() = nullptr;
+  void (*setTrebleGain)(float) = nullptr;
+
   float (*getFps)() = nullptr;
   float (*getVu)() = nullptr;
   float (*getRms)() = nullptr;

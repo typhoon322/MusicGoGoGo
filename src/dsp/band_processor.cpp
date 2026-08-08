@@ -30,16 +30,29 @@ void BandProcessor::process(const float *input, float *output) {
     }
   }
 
+  constexpr float kSilence = 0.028f;
   if (autoLevelEnabled_) {
-    if (framePeak > levelTrack_) {
+    // Absolute silence / noise-floor gate: do NOT let AGC inflate HVAC
+    // rumble into full-scale bars after the music stops.
+    if (framePeak < kSilence) {
+      levelTrack_ *= 0.82f;
+      if (levelTrack_ < 0.04f) {
+        levelTrack_ = 0.04f;
+      }
+      autoGain_ *= 0.80f;
+      if (autoGain_ < 1.0f) {
+        autoGain_ = 1.0f;
+      }
+    } else if (framePeak > levelTrack_) {
       levelTrack_ = framePeak;
+      autoGain_ = 0.82f / levelTrack_;
     } else {
       levelTrack_ = levelTrack_ * 0.992f + framePeak * 0.008f;
+      if (levelTrack_ < 0.04f) {
+        levelTrack_ = 0.04f;
+      }
+      autoGain_ = 0.82f / levelTrack_;
     }
-    if (levelTrack_ < 0.04f) {
-      levelTrack_ = 0.04f;
-    }
-    autoGain_ = 0.82f / levelTrack_;
     if (autoGain_ < 0.35f) {
       autoGain_ = 0.35f;
     }
@@ -50,8 +63,12 @@ void BandProcessor::process(const float *input, float *output) {
     autoGain_ = 1.0f;
   }
 
+  const bool silent = framePeak < kSilence;
+  const float decayNow = silent ? 0.48f : decay_;
+  const float peakDecayNow = silent ? 0.62f : peakDecay_;
+
   for (size_t i = 0; i < bandCount_; ++i) {
-    float target = input[i] * autoGain_;
+    float target = silent ? 0.0f : (input[i] * autoGain_);
     if (target > 1.0f) {
       target = 1.0f;
     }
@@ -59,7 +76,7 @@ void BandProcessor::process(const float *input, float *output) {
     if (target > smoothed_[i]) {
       smoothed_[i] += (target - smoothed_[i]) * attack_;
     } else {
-      smoothed_[i] = smoothed_[i] * decay_ + target * (1.0f - decay_);
+      smoothed_[i] = smoothed_[i] * decayNow + target * (1.0f - decayNow);
     }
 
     if (smoothed_[i] < 0.002f) {
@@ -69,7 +86,7 @@ void BandProcessor::process(const float *input, float *output) {
     if (smoothed_[i] > peaks_[i]) {
       peaks_[i] = smoothed_[i];
     } else {
-      peaks_[i] *= peakDecay_;
+      peaks_[i] *= peakDecayNow;
       if (peaks_[i] < smoothed_[i]) {
         peaks_[i] = smoothed_[i];
       }

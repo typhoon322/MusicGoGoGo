@@ -72,6 +72,23 @@ a{color:var(--acc)}
 </div>
 
 <div class="card">
+<h2>频段 EQ</h2>
+<p style="color:var(--dim);font-size:12px;margin:0 0 8px">低/中/高各 1/3 柱；1.0=不削不抬。空调噪声可把低频调到 0.5 左右。</p>
+<div class="row">
+<label>低频 (1–10 · ~20–200Hz) <b id="v-bass"></b></label>
+<input type="range" id="bass" min="0" max="2" step="0.05">
+</div>
+<div class="row">
+<label>中频 (11–20 · ~200Hz–2k) <b id="v-mid"></b></label>
+<input type="range" id="mid" min="0" max="2" step="0.05">
+</div>
+<div class="row">
+<label>高频 (21–30 · ~2–20k) <b id="v-treble"></b></label>
+<input type="range" id="treble" min="0" max="2" step="0.05">
+</div>
+</div>
+
+<div class="card">
 <h2>响应</h2>
 <div class="grid2">
 <div class="row">
@@ -108,21 +125,40 @@ a{color:var(--acc)}
 </div>
 
 <div class="card">
-<h2>12 段对数频带参考</h2>
+<h2>频带参考</h2>
+<p style="color:var(--dim);font-size:12px;margin:0 0 8px">Bars/Mirror/… 为 30 段 1/3 倍频程；仅 <b>Log 12</b> 仍用 12 段倍频程。</p>
 <table style="width:100%;border-collapse:collapse;font-size:12px">
-<tr style="color:var(--dim);text-align:left"><th style="padding:4px 0">段</th><th>约 Hz</th><th>听感 / 乐器</th></tr>
-<tr><td>1</td><td>~60–90</td><td>低音鼓、贝斯根基</td></tr>
-<tr><td>2</td><td>~90–130</td><td>贝斯琴体、踢鼓冲击</td></tr>
-<tr><td>3</td><td>~130–200</td><td>男低音、大提琴</td></tr>
-<tr><td>4</td><td>~200–300</td><td>男声胸腔、吉他低弦</td></tr>
-<tr><td>5</td><td>~300–450</td><td>人声基频、钢琴中低</td></tr>
-<tr><td>6</td><td>~450–700</td><td>人声主体、吉他中频</td></tr>
-<tr><td>7</td><td>~700–1.1k</td><td>鼻音/存在感、小号</td></tr>
-<tr><td>8</td><td>~1.1–1.7k</td><td>人声清晰度、弦乐</td></tr>
-<tr><td>9</td><td>~1.7–2.6k</td><td>齿音前区、电吉他咬感</td></tr>
-<tr><td>10</td><td>~2.6–4k</td><td>齿音、镲片起始</td></tr>
-<tr><td>11</td><td>~4–6.5k</td><td>空气感、镲片闪亮</td></tr>
-<tr><td>12</td><td>~6.5–10k+</td><td>超高频空气、嘶声</td></tr>
+<tr style="color:var(--dim);text-align:left"><th style="padding:4px 0">柱</th><th>Hz</th></tr>
+<tr><td>1</td><td>20–25</td></tr>
+<tr><td>2</td><td>25–31</td></tr>
+<tr><td>3</td><td>31–40</td></tr>
+<tr><td>4</td><td>40–50</td></tr>
+<tr><td>5</td><td>50–63</td></tr>
+<tr><td>6</td><td>63–80</td></tr>
+<tr><td>7</td><td>80–100</td></tr>
+<tr><td>8</td><td>100–125</td></tr>
+<tr><td>9</td><td>125–160</td></tr>
+<tr><td>10</td><td>160–200</td></tr>
+<tr><td>11</td><td>200–250</td></tr>
+<tr><td>12</td><td>250–315</td></tr>
+<tr><td>13</td><td>315–400</td></tr>
+<tr><td>14</td><td>400–500</td></tr>
+<tr><td>15</td><td>500–630</td></tr>
+<tr><td>16</td><td>630–800</td></tr>
+<tr><td>17</td><td>800–1k</td></tr>
+<tr><td>18</td><td>1–1.25k</td></tr>
+<tr><td>19</td><td>1.25–1.6k</td></tr>
+<tr><td>20</td><td>1.6–2k</td></tr>
+<tr><td>21</td><td>2–2.5k</td></tr>
+<tr><td>22</td><td>2.5–3.15k</td></tr>
+<tr><td>23</td><td>3.15–4k</td></tr>
+<tr><td>24</td><td>4–5k</td></tr>
+<tr><td>25</td><td>5–6.3k</td></tr>
+<tr><td>26</td><td>6.3–8k</td></tr>
+<tr><td>27</td><td>8–10k</td></tr>
+<tr><td>28</td><td>10–12.5k</td></tr>
+<tr><td>29</td><td>12.5–16k</td></tr>
+<tr><td>30</td><td>16–20k</td></tr>
 </table>
 </div>
 
@@ -156,6 +192,12 @@ async function state(){
     $('auto').checked=s.autoCycle;
     $('alevel').checked=s.autoLevel;
     $('flabels').checked=!!s.freqLabels;
+    if(document.activeElement!==$('bass'))$('bass').value=s.bassGain;
+    $('v-bass').textContent=Number(s.bassGain).toFixed(2);
+    if(document.activeElement!==$('mid'))$('mid').value=s.midGain;
+    $('v-mid').textContent=Number(s.midGain).toFixed(2);
+    if(document.activeElement!==$('treble'))$('treble').value=s.trebleGain;
+    $('v-treble').textContent=Number(s.trebleGain).toFixed(2);
   }catch(e){}
 }
 function paintModes(cur){
@@ -178,12 +220,18 @@ function bind(id,evt,fmt){
 }
 $('ssid').textContent=location.hostname;
 bind('gain','input',v=>Number(v).toFixed(2));
+bind('bass','input',v=>Number(v).toFixed(2));
+bind('mid','input',v=>Number(v).toFixed(2));
+bind('treble','input',v=>Number(v).toFixed(2));
 bind('attack','input',v=>Number(v).toFixed(2));
 bind('decay','input',v=>Number(v).toFixed(2));
 bind('peak','input',v=>Number(v).toFixed(3));
 bind('frame','input',v=>v);
 bind('cycle','input',v=>v);
-bind('bright','input',v=>v);
+$('bright').addEventListener('input',()=>{
+  ctrl('brightness='+$('bright').value);
+  $('v-bright').textContent=$('bright').value;
+});
 $('auto').addEventListener('change',e=>ctrl('auto='+(e.target.checked?1:0)));
 $('alevel').addEventListener('change',e=>ctrl('alevel='+(e.target.checked?1:0)));
 $('flabels').addEventListener('change',e=>ctrl('freqLabels='+(e.target.checked?1:0)));
@@ -261,6 +309,9 @@ void WebUi::startServer_() {
     json += ",\"peakDecay\":" + String(cb_.getPeakDecay(), 3);
     json += ",\"autoLevel\":" + String(cb_.getAutoLevel() ? 1 : 0);
     json += ",\"freqLabels\":" + String(cb_.getFreqLabels() ? 1 : 0);
+    json += ",\"bassGain\":" + String(cb_.getBassGain(), 3);
+    json += ",\"midGain\":" + String(cb_.getMidGain(), 3);
+    json += ",\"trebleGain\":" + String(cb_.getTrebleGain(), 3);
     json += ",\"uptime\":" + String(cb_.getUptimeMs() / 1000);
     json += "}";
     request->send(200, "application/json", json);
@@ -273,8 +324,10 @@ void WebUi::startServer_() {
     if (request->hasParam("gain")) {
       cb_.setGain(request->arg("gain").toFloat());
     }
-    if (request->hasParam("brightness")) {
-      cb_.setBrightness(static_cast<uint8_t>(request->arg("brightness").toInt()));
+    if (request->hasParam("brightness") || request->hasParam("bright")) {
+      const int v = request->hasParam("brightness") ? request->arg("brightness").toInt()
+                                                    : request->arg("bright").toInt();
+      cb_.setBrightness(static_cast<uint8_t>(v));
     }
     if (request->hasParam("auto")) {
       cb_.setAutoCycle(request->arg("auto").toInt() != 0);
@@ -299,6 +352,15 @@ void WebUi::startServer_() {
     }
     if (request->hasParam("freqLabels")) {
       cb_.setFreqLabels(request->arg("freqLabels").toInt() != 0);
+    }
+    if (request->hasParam("bass") && cb_.setBassGain) {
+      cb_.setBassGain(request->arg("bass").toFloat());
+    }
+    if (request->hasParam("mid") && cb_.setMidGain) {
+      cb_.setMidGain(request->arg("mid").toFloat());
+    }
+    if (request->hasParam("treble") && cb_.setTrebleGain) {
+      cb_.setTrebleGain(request->arg("treble").toFloat());
     }
     request->send(200, "application/json", "{\"ok\":true}");
   });

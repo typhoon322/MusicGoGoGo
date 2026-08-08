@@ -10,7 +10,7 @@
 #define CARDPUTER_USE_BUILTIN_LCD 1
 
 // ES8311 mic is managed by M5Cardputer library (not raw I2S pins)
-#define I2S_SAMPLE_RATE 16000
+#define I2S_SAMPLE_RATE 44100
 
 #if CARDPUTER_USE_BUILTIN_LCD
 // Landscape after setRotation(1): 240×135
@@ -36,14 +36,14 @@
 #define TFT_Y_OFFSET 0
 #endif
 
-#define FFT_SIZE 512
-#define SPECTRUM_BARS 32
+#define FFT_SIZE 2048
+#define SPECTRUM_BARS 30
 
 // No OPI PSRAM on Cardputer ADV — keep waterfall buffer small enough for internal RAM
 #define VFX_WATERFALL_HISTORY 80
 
-// Align UI refresh with mic buffer (~512 samples @ 16 kHz ≈ 32 ms)
-#define SPECTRUM_FRAME_MS 32
+// ~2048 samples @ 44.1 kHz ≈ 46 ms
+#define SPECTRUM_FRAME_MS 48
 
 // Smoother bars on Cardputer (less SPI flicker)
 #define SPECTRUM_DECAY_CARDPUTER 0.90f

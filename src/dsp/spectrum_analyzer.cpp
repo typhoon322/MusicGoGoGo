@@ -5,47 +5,30 @@
 #include <math.h>
 
 namespace {
+// 12-band octave edges (Log12 only).
+constexpr float kOctave12EdgesHz[] = {20.0f,   40.0f,    80.0f,    160.0f,   315.0f,
+                                      630.0f,  1250.0f,  2500.0f,  5000.0f,  8000.0f,
+                                      12000.0f, 16000.0f, 20000.0f};
+
+// 30-band ~1/3-octave edges (Bars / Mirror / Rainbow / …).
+constexpr float kThird30EdgesHz[] = {
+    20.0f,    25.0f,    31.0f,    40.0f,    50.0f,    63.0f,    80.0f,    100.0f,
+    125.0f,   160.0f,   200.0f,   250.0f,   315.0f,   400.0f,   500.0f,   630.0f,
+    800.0f,   1000.0f,  1250.0f,  1600.0f,  2000.0f,  2500.0f,  3150.0f,  4000.0f,
+    5000.0f,  6300.0f,  8000.0f,  10000.0f, 12500.0f, 16000.0f, 20000.0f};
+
 size_t binForFrequency(float hz) {
   const float binWidth = static_cast<float>(I2S_SAMPLE_RATE) / static_cast<float>(FFT_SIZE);
   if (hz <= 0.0f || binWidth <= 0.0f) {
     return 0;
   }
-  size_t bin = static_cast<size_t>(hz / binWidth);
+  size_t bin = static_cast<size_t>(hz / binWidth + 0.5f);
   const size_t maxBin = FFT_SIZE / 2;
   if (bin >= maxBin) {
     return maxBin - 1;
   }
   return bin;
 }
-
-float logEdgeHz(size_t index, size_t count) {
-#if defined(BOARD_CARDPUTER_ADV)
-  const float minHz = 90.0f;
-#else
-  const float minHz = 60.0f;
-#endif
-  const float maxHz = static_cast<float>(I2S_SAMPLE_RATE) * 0.48f;
-  const float t = static_cast<float>(index) / static_cast<float>(count);
-  return minHz * powf(maxHz / minHz, t);
-}
-
-#if defined(BOARD_CARDPUTER_ADV)
-float bassWeight_(size_t band) {
-  static const float kWeights[] = {0.82f, 0.88f, 0.92f, 0.96f};
-  if (band >= 4) {
-    return 1.0f;
-  }
-  return kWeights[band];
-}
-
-size_t lowBinSkip_(size_t band) {
-  static const size_t kSkip[] = {5, 3, 2, 1};
-  if (band >= 4) {
-    return 0;
-  }
-  return kSkip[band];
-}
-#endif
 
 float avgMagnitude(const float *mags, size_t lo, size_t hi) {
   if (hi <= lo) {
@@ -64,8 +47,53 @@ bool SpectrumAnalyzer::begin() {
     real_[i] = 0.0f;
     imag_[i] = 0.0f;
   }
-  Serial.printf("[fft] OK size=%u rate=%u\n", FFT_SIZE, I2S_SAMPLE_RATE);
+  Serial.printf("[fft] OK size=%u rate=%u bars=%u log=%u (20Hz-20kHz)\n", FFT_SIZE,
+                I2S_SAMPLE_RATE, static_cast<unsigned>(SPECTRUM_BARS),
+                static_cast<unsigned>(VFX_LOG_BANDS));
   return true;
+}
+
+float SpectrumAnalyzer::clampEqGain_(float g) {
+  if (g < 0.0f) {
+    return 0.0f;
+  }
+  if (g > 2.0f) {
+    return 2.0f;
+  }
+  return g;
+}
+
+void SpectrumAnalyzer::setBassGain(float g) {
+  bassGain_ = clampEqGain_(g);
+}
+
+void SpectrumAnalyzer::setMidGain(float g) {
+  midGain_ = clampEqGain_(g);
+}
+
+void SpectrumAnalyzer::setTrebleGain(float g) {
+  trebleGain_ = clampEqGain_(g);
+}
+
+void SpectrumAnalyzer::setEqGains(float bass, float mid, float treble) {
+  bassGain_ = clampEqGain_(bass);
+  midGain_ = clampEqGain_(mid);
+  trebleGain_ = clampEqGain_(treble);
+}
+
+float SpectrumAnalyzer::bandEqGain_(size_t band, size_t bandCount) const {
+  // Thirds: 30→10/10/10, 12→4/4/4.
+  size_t third = bandCount / 3;
+  if (third < 1) {
+    third = 1;
+  }
+  if (band < third) {
+    return bassGain_;
+  }
+  if (band < third * 2) {
+    return midGain_;
+  }
+  return trebleGain_;
 }
 
 float SpectrumAnalyzer::magnitudeToLevel_(float mag) const {
@@ -73,42 +101,27 @@ float SpectrumAnalyzer::magnitudeToLevel_(float mag) const {
 }
 
 void SpectrumAnalyzer::fillLogBands_(float *out, size_t count) {
-  for (size_t b = 0; b < count; ++b) {
-    size_t lo = binForFrequency(logEdgeHz(b, count));
-    size_t hi = binForFrequency(logEdgeHz(b + 1, count));
-    if (lo == 0) {
-      lo = 1;
-    }
-    if (hi <= lo) {
-      hi = lo + 1;
-    }
-    const float mag = avgMagnitude(real_, lo, hi);
-    out[b] = magnitudeToLevel_(mag);
-  }
+  fillLinearBands_(out, count, false);
 }
 
-void SpectrumAnalyzer::fillLinearBands_(float *out, size_t count, bool linearSpacing) {
+void SpectrumAnalyzer::fillLinearBands_(float *out, size_t count, bool /*linearSpacing*/) {
   const size_t maxBin = FFT_SIZE / 2;
-  for (size_t b = 0; b < count; ++b) {
-    size_t lo = 0;
-    size_t hi = 0;
-    if (linearSpacing) {
-      lo = (b * maxBin) / count;
-      hi = ((b + 1) * maxBin) / count;
-#if defined(BOARD_CARDPUTER_ADV)
-      const size_t skip = lowBinSkip_(b);
-      if (lo < skip) {
-        lo = skip;
-      }
-#else
-      // Skip DC + very low bins (1/f noise)
-      if (b == 0 && lo < 4) {
-        lo = 4;
-      }
-#endif
-    } else {
-      lo = binForFrequency(logEdgeHz(b, count));
-      hi = binForFrequency(logEdgeHz(b + 1, count));
+  const float *edges = kThird30EdgesHz;
+  size_t edgeBands = 30;
+  if (count == VFX_LOG_BANDS || count == 12) {
+    edges = kOctave12EdgesHz;
+    edgeBands = 12;
+  } else if (count >= 30) {
+    edges = kThird30EdgesHz;
+    edgeBands = 30;
+  }
+
+  const size_t n = count < edgeBands ? count : edgeBands;
+  for (size_t b = 0; b < n; ++b) {
+    size_t lo = binForFrequency(edges[b]);
+    size_t hi = binForFrequency(edges[b + 1]);
+    if (lo < 1) {
+      lo = 1;
     }
     if (hi <= lo) {
       hi = lo + 1;
@@ -116,14 +129,15 @@ void SpectrumAnalyzer::fillLinearBands_(float *out, size_t count, bool linearSpa
     if (hi > maxBin) {
       hi = maxBin;
     }
-    if (lo == 0) {
-      lo = 1;
-    }
     const float mag = avgMagnitude(real_, lo, hi);
-    out[b] = magnitudeToLevel_(mag);
-#if defined(BOARD_CARDPUTER_ADV)
-    out[b] *= bassWeight_(b);
-#endif
+    float level = magnitudeToLevel_(mag) * bandEqGain_(b, n);
+    if (level > 1.0f) {
+      level = 1.0f;
+    }
+    out[b] = level;
+  }
+  for (size_t b = n; b < count; ++b) {
+    out[b] = 0.0f;
   }
 }
 

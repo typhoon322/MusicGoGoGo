@@ -11,11 +11,11 @@
 #define PIN_I2S_WS 5
 #define PIN_I2S_SD 6
 
-// I2S sample config
+// I2S sample config — 44.1kHz so bands reach ~20kHz (Nyquist)
 #define I2S_PORT I2S_NUM_0
-#define I2S_SAMPLE_RATE 16000
+#define I2S_SAMPLE_RATE 44100
 #define I2S_BITS_PER_SAMPLE 32
-#define I2S_DMA_BUF_COUNT 4
+#define I2S_DMA_BUF_COUNT 8
 #define I2S_DMA_BUF_LEN 256
 
 // ST7789 TFT (SPI) — 3.2" 320×240 landscape
@@ -44,12 +44,17 @@
 #define TFT_X_OFFSET 0
 #define TFT_Y_OFFSET 0
 
-// FFT / spectrum display defaults
-#define FFT_SIZE 512
-#define SPECTRUM_BARS 32
+// FFT / spectrum — 30× 1/3-octave bands (20Hz–20kHz); Log12 keeps 12
+#define FFT_SIZE 2048
+#define SPECTRUM_BARS 30
 
 // Auto-cycle disabled by default on S3; enable anytime via Web UI / serial 'a'
 #define VFX_AUTO_CYCLE_MS 0
+
+// FFT window ≈ 2048/44100 ≈ 46 ms
+#ifndef SPECTRUM_FRAME_MS
+#define SPECTRUM_FRAME_MS 48
+#endif
 
 // No usable PSRAM on this dev board — keep the waterfall ring buffer small so
 // WiFi/AsyncTCP have enough heap during boot.

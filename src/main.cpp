@@ -6,6 +6,7 @@
 #include "display/display_driver.h"
 #include "dsp/band_processor.h"
 #include "dsp/spectrum_analyzer.h"
+#include "settings/app_settings.h"
 #include "vfx.h"
 
 #if defined(BOARD_CARDPUTER_ADV)
@@ -27,6 +28,7 @@ BandProcessor bandLinear;
 BandProcessor bandLog;
 BandProcessor bandMirror;
 DisplayDriver display;
+AppSettings settings;
 #if !defined(BOARD_CARDPUTER_ADV)
 RotaryEncoder encoder;
 GainPot gainPot;
@@ -38,6 +40,71 @@ bool autoCycleEnabled = false;
 // Runtime-tunable timings (defaults from board headers)
 uint32_t g_frameMs = SPECTRUM_FRAME_MS;
 uint32_t g_cycleMs = VFX_AUTO_CYCLE_MS;
+
+static void cfgDirty() {
+  settings.markDirty();
+}
+
+static void cfgCapture() {
+  AppSettingsData &d = settings.data();
+  d.mode = static_cast<uint8_t>(display.mode());
+  d.gain = audioMic.gain();
+  d.brightness = display.backlightLevel();
+  d.autoCycle = autoCycleEnabled;
+  d.cycleMs = g_cycleMs;
+  d.frameMs = g_frameMs;
+  d.decay = bandLinear.decay();
+  d.attack = bandLinear.attack();
+  d.peakDecay = bandLinear.peakDecay();
+  d.autoLevel = bandLinear.autoLevelEnabled();
+  d.freqLabels = display.showFreqLabels();
+  d.bassGain = spectrum.bassGain();
+  d.midGain = spectrum.midGain();
+  d.trebleGain = spectrum.trebleGain();
+#if !defined(BOARD_CARDPUTER_ADV)
+  d.potEnabled = gainPot.enabled();
+#endif
+}
+
+static void cfgTouch() {
+  cfgCapture();
+  cfgDirty();
+}
+
+static void applyLoadedSettings() {
+  const AppSettingsData &d = settings.data();
+  if (d.mode < static_cast<uint8_t>(VfxMode::Count)) {
+    display.setMode(static_cast<VfxMode>(d.mode));
+  }
+  g_frameMs = d.frameMs;
+  g_cycleMs = d.cycleMs;
+  autoCycleEnabled = d.autoCycle;
+  bandLinear.setDecay(d.decay);
+  bandLog.setDecay(d.decay);
+  bandMirror.setDecay(d.decay);
+  bandLinear.setAttack(d.attack);
+  bandLog.setAttack(d.attack);
+  bandMirror.setAttack(d.attack);
+  bandLinear.setPeakDecay(d.peakDecay);
+  bandLog.setPeakDecay(d.peakDecay);
+  bandMirror.setPeakDecay(d.peakDecay);
+  bandLinear.setAutoLevelEnabled(d.autoLevel);
+  bandLog.setAutoLevelEnabled(d.autoLevel);
+  bandMirror.setAutoLevelEnabled(d.autoLevel);
+  display.setShowFreqLabels(d.freqLabels);
+  spectrum.setEqGains(d.bassGain, d.midGain, d.trebleGain);
+  display.setBacklight(d.brightness);
+#if !defined(BOARD_CARDPUTER_ADV)
+  gainPot.setEnabled(d.potEnabled);
+  if (d.potEnabled) {
+    audioMic.setGain(gainPot.gain());
+  } else {
+    audioMic.setGain(d.gain);
+  }
+#else
+  audioMic.setGain(d.gain);
+#endif
+}
 
 int16_t sampleBuffer[FFT_SIZE];
 float smoothBars[SPECTRUM_BARS];
@@ -70,6 +137,7 @@ static void wbSetMode(uint8_t m) {
   if (m < static_cast<uint8_t>(VfxMode::Count)) {
     display.setMode(static_cast<VfxMode>(m));
     lastModeCycleMs = millis();
+    cfgTouch();
   }
 }
 static const char *wbGetModeName(uint8_t m) {
@@ -83,12 +151,14 @@ static float wbGetGain() {
 }
 static void wbSetGain(float g) {
   audioMic.setGain(g);
+  cfgTouch();
 }
 static uint8_t wbGetBrightness() {
   return display.backlightLevel();
 }
 static void wbSetBrightness(uint8_t v) {
   display.setBacklight(v);
+  cfgTouch();
 }
 static bool wbGetAutoCycle() {
   return autoCycleEnabled;
@@ -99,12 +169,14 @@ static void wbSetAutoCycle(bool b) {
     lastModeCycleMs = millis();
   }
   Serial.printf("[web] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
+  cfgTouch();
 }
 static uint32_t wbGetCycleMs() {
   return g_cycleMs;
 }
 static void wbSetCycleMs(uint32_t v) {
   g_cycleMs = v;
+  cfgTouch();
 }
 static uint32_t wbGetFrameMs() {
   return g_frameMs;
@@ -112,6 +184,7 @@ static uint32_t wbGetFrameMs() {
 static void wbSetFrameMs(uint32_t v) {
   if (v >= 10 && v <= 500) {
     g_frameMs = v;
+    cfgTouch();
   }
 }
 static float wbGetDecay() {
@@ -121,6 +194,7 @@ static void wbSetDecay(float v) {
   bandLinear.setDecay(v);
   bandLog.setDecay(v);
   bandMirror.setDecay(v);
+  cfgTouch();
 }
 static float wbGetAttack() {
   return bandLinear.attack();
@@ -129,6 +203,7 @@ static void wbSetAttack(float v) {
   bandLinear.setAttack(v);
   bandLog.setAttack(v);
   bandMirror.setAttack(v);
+  cfgTouch();
 }
 static float wbGetPeakDecay() {
   return bandLinear.peakDecay();
@@ -137,6 +212,7 @@ static void wbSetPeakDecay(float v) {
   bandLinear.setPeakDecay(v);
   bandLog.setPeakDecay(v);
   bandMirror.setPeakDecay(v);
+  cfgTouch();
 }
 static bool wbGetAutoLevel() {
   return bandLinear.autoLevelEnabled();
@@ -145,12 +221,35 @@ static void wbSetAutoLevel(bool b) {
   bandLinear.setAutoLevelEnabled(b);
   bandLog.setAutoLevelEnabled(b);
   bandMirror.setAutoLevelEnabled(b);
+  cfgTouch();
 }
 static bool wbGetFreqLabels() {
   return display.showFreqLabels();
 }
 static void wbSetFreqLabels(bool b) {
   display.setShowFreqLabels(b);
+  cfgTouch();
+}
+static float wbGetBassGain() {
+  return spectrum.bassGain();
+}
+static void wbSetBassGain(float g) {
+  spectrum.setBassGain(g);
+  cfgTouch();
+}
+static float wbGetMidGain() {
+  return spectrum.midGain();
+}
+static void wbSetMidGain(float g) {
+  spectrum.setMidGain(g);
+  cfgTouch();
+}
+static float wbGetTrebleGain() {
+  return spectrum.trebleGain();
+}
+static void wbSetTrebleGain(float g) {
+  spectrum.setTrebleGain(g);
+  cfgTouch();
 }
 static float wbGetFps() {
   const uint32_t elapsed = millis();
@@ -198,6 +297,12 @@ static void setupWebUi() {
   cb.setAutoLevel = wbSetAutoLevel;
   cb.getFreqLabels = wbGetFreqLabels;
   cb.setFreqLabels = wbSetFreqLabels;
+  cb.getBassGain = wbGetBassGain;
+  cb.setBassGain = wbSetBassGain;
+  cb.getMidGain = wbGetMidGain;
+  cb.setMidGain = wbSetMidGain;
+  cb.getTrebleGain = wbGetTrebleGain;
+  cb.setTrebleGain = wbSetTrebleGain;
   cb.getFps = wbGetFps;
   cb.getVu = wbGetVu;
   cb.getRms = wbGetRms;
@@ -270,6 +375,7 @@ void handleCardputerInput() {
     if (btnAPressMs > 0 && !btnAHandled) {
       display.nextMode();
       lastModeCycleMs = millis();
+      cfgTouch();
       Serial.println(F("[key] BtnA -> next mode"));
     }
     btnAPressMs = 0;
@@ -287,23 +393,28 @@ void handleCardputerInput() {
   if (M5Cardputer.Keyboard.isKeyPressed(',') || M5Cardputer.Keyboard.isKeyPressed(';')) {
     display.prevMode();
     lastModeCycleMs = millis();
+    cfgTouch();
     Serial.println(F("[key] ,/; -> prev mode"));
   }
   if (M5Cardputer.Keyboard.isKeyPressed('.') || M5Cardputer.Keyboard.isKeyPressed(':')) {
     display.nextMode();
     lastModeCycleMs = millis();
+    cfgTouch();
     Serial.println(F("[key] ./: -> next mode"));
   }
   if (M5Cardputer.Keyboard.isKeyPressed('/')) {
     autoCycleEnabled = !autoCycleEnabled;
+    cfgTouch();
     Serial.printf("[vfx] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
   }
   if (M5Cardputer.Keyboard.isKeyPressed('[')) {
     audioMic.setGain(audioMic.gain() - 0.25f);
+    cfgTouch();
     Serial.printf("[mic] gain=%.1f\n", audioMic.gain());
   }
   if (M5Cardputer.Keyboard.isKeyPressed(']')) {
     audioMic.setGain(audioMic.gain() + 0.25f);
+    cfgTouch();
     Serial.printf("[mic] gain=%.1f\n", audioMic.gain());
   }
 }
@@ -316,19 +427,23 @@ void handleInput() {
   if (step > 0) {
     display.nextMode();
     lastModeCycleMs = millis();
+    cfgTouch();
   } else if (step < 0) {
     display.prevMode();
     lastModeCycleMs = millis();
+    cfgTouch();
   }
 
   if (encoder.consumePress()) {
     autoCycleEnabled = !autoCycleEnabled;
+    cfgTouch();
     Serial.printf("[vfx] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
   }
 
   if (gainPot.changed()) {
     audioMic.setGain(gainPot.gain());
     gainPot.clearChanged();
+    cfgTouch();
   }
 }
 #endif
@@ -337,17 +452,21 @@ static void printSerialHelp() {
   Serial.println(F("=== MusicGoGoGo serial commands ==="));
   Serial.println(F("n / next          next effect"));
   Serial.println(F("p / prev          previous effect"));
-  Serial.println(F("m / mode [n]      show effect, or jump: 0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks 7=Bounce 8=Dot 9=Glow 10=Ring"));
+  Serial.println(F("m / mode [n]      show effect, or jump: 0=Bars30 1=Log12 2=Mirror 3=VU 4=Rainbow 5=LinePeaks 6=Bounce 7=Dot 8=Glow 9=Ring"));
   Serial.println(F("g / gain [val]    show mic gain, or set: g 3.0 / g+ / g-"));
   Serial.println(F("+ / -             gain step (+/-0.25)"));
 #if !defined(BOARD_CARDPUTER_ADV)
   Serial.println(F("pot [on|off]      gain pot control (set gain via serial disables it)"));
   Serial.println(F("fl / labels [on|off]  TFT frequency labels"));
+  Serial.println(F("bl / bright [0-255]   backlight brightness"));
 #endif
   Serial.println(F("a / auto [on|off] toggle auto-cycle"));
   Serial.println(F("al [on|off]       auto level (AGC) on/off"));
+  Serial.println(F("eq [b m t]        show/set EQ gains 0..2 (bass mid treble)"));
   Serial.println(F("s / status        print status"));
   Serial.println(F("d / debug         toggle debug overlay (Cardputer)"));
+  Serial.println(F("cfg / cfg save    show or force-save settings"));
+  Serial.println(F("cfg reset         factory defaults + save"));
   Serial.println(F("h / help / ?      this help"));
   Serial.println(F("=================================="));
 }
@@ -366,12 +485,14 @@ static void parseSerialCommand(char *line) {
   if (strcmp(cmd, "next") == 0 || cmd[0] == 'n') {
     display.nextMode();
     lastModeCycleMs = millis();
+    cfgTouch();
     Serial.printf("[cmd] mode -> %s\n", vfxModeName(display.mode()));
     return;
   }
   if (strcmp(cmd, "prev") == 0 || cmd[0] == 'p') {
     display.prevMode();
     lastModeCycleMs = millis();
+    cfgTouch();
     Serial.printf("[cmd] mode -> %s\n", vfxModeName(display.mode()));
     return;
   }
@@ -379,7 +500,9 @@ static void parseSerialCommand(char *line) {
     if (arg == nullptr) {
       Serial.printf("[cmd] mode = %s (%u)\n", vfxModeName(display.mode()),
                     static_cast<unsigned>(display.mode()));
-    } else if (strcmp(arg, "next") == 0) {
+      return;
+    }
+    if (strcmp(arg, "next") == 0) {
       display.nextMode();
     } else if (strcmp(arg, "prev") == 0) {
       display.prevMode();
@@ -394,6 +517,7 @@ static void parseSerialCommand(char *line) {
       }
     }
     lastModeCycleMs = millis();
+    cfgTouch();
     Serial.printf("[cmd] mode -> %s\n", vfxModeName(display.mode()));
     return;
   }
@@ -412,6 +536,7 @@ static void parseSerialCommand(char *line) {
       gainPot.setEnabled(false);
       Serial.println(F("[cmd] gain pot control disabled (enable with 'pot on')"));
 #endif
+      cfgTouch();
     }
     Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
     return;
@@ -421,6 +546,7 @@ static void parseSerialCommand(char *line) {
 #if !defined(BOARD_CARDPUTER_ADV)
     gainPot.setEnabled(false);
 #endif
+    cfgTouch();
     Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
     return;
   }
@@ -429,6 +555,7 @@ static void parseSerialCommand(char *line) {
 #if !defined(BOARD_CARDPUTER_ADV)
     gainPot.setEnabled(false);
 #endif
+    cfgTouch();
     Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
     return;
   }
@@ -437,9 +564,11 @@ static void parseSerialCommand(char *line) {
     if (arg != nullptr && strcmp(arg, "on") == 0) {
       gainPot.setEnabled(true);
       Serial.println(F("[cmd] gain pot control enabled"));
+      cfgTouch();
     } else if (arg != nullptr && strcmp(arg, "off") == 0) {
       gainPot.setEnabled(false);
       Serial.println(F("[cmd] gain pot control disabled"));
+      cfgTouch();
     } else {
       Serial.printf("[cmd] gain pot control %s\n",
                     gainPot.enabled() ? "enabled" : "disabled");
@@ -449,10 +578,20 @@ static void parseSerialCommand(char *line) {
   if (strcmp(cmd, "labels") == 0 || strcmp(cmd, "fl") == 0) {
     if (arg != nullptr && strcmp(arg, "on") == 0) {
       display.setShowFreqLabels(true);
+      cfgTouch();
     } else if (arg != nullptr && strcmp(arg, "off") == 0) {
       display.setShowFreqLabels(false);
+      cfgTouch();
     }
     Serial.printf("[cmd] freq labels %s\n", display.showFreqLabels() ? "ON" : "OFF");
+    return;
+  }
+  if (strcmp(cmd, "bright") == 0 || strcmp(cmd, "bl") == 0) {
+    if (arg != nullptr) {
+      display.setBacklight(static_cast<uint8_t>(atoi(arg)));
+      cfgTouch();
+    }
+    Serial.printf("[cmd] backlight = %u\n", display.backlightLevel());
     return;
   }
 #endif
@@ -462,11 +601,13 @@ static void parseSerialCommand(char *line) {
       bandLog.setAutoLevelEnabled(true);
       bandMirror.setAutoLevelEnabled(true);
       Serial.println(F("[cmd] auto level ON"));
+      cfgTouch();
     } else if (arg != nullptr && strcmp(arg, "off") == 0) {
       bandLinear.setAutoLevelEnabled(false);
       bandLog.setAutoLevelEnabled(false);
       bandMirror.setAutoLevelEnabled(false);
       Serial.println(F("[cmd] auto level OFF"));
+      cfgTouch();
     } else {
       Serial.printf("[cmd] auto level %s\n",
                     bandLinear.autoLevelEnabled() ? "ON" : "OFF");
@@ -484,7 +625,52 @@ static void parseSerialCommand(char *line) {
     if (autoCycleEnabled) {
       lastModeCycleMs = millis();
     }
+    cfgTouch();
     Serial.printf("[cmd] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
+    return;
+  }
+  if (strcmp(cmd, "eq") == 0) {
+    if (arg == nullptr) {
+      Serial.printf("[cmd] eq bass=%.2f mid=%.2f treble=%.2f\n", spectrum.bassGain(),
+                    spectrum.midGain(), spectrum.trebleGain());
+      return;
+    }
+    const float bass = atof(arg);
+    char *arg2 = strtok(nullptr, " \t");
+    char *arg3 = strtok(nullptr, " \t");
+    const float mid = arg2 != nullptr ? static_cast<float>(atof(arg2)) : spectrum.midGain();
+    const float treble =
+        arg3 != nullptr ? static_cast<float>(atof(arg3)) : spectrum.trebleGain();
+    spectrum.setEqGains(bass, mid, treble);
+    cfgTouch();
+    Serial.printf("[cmd] eq bass=%.2f mid=%.2f treble=%.2f\n", spectrum.bassGain(),
+                  spectrum.midGain(), spectrum.trebleGain());
+    return;
+  }
+  if (strcmp(cmd, "cfg") == 0) {
+    if (arg != nullptr && strcmp(arg, "save") == 0) {
+      cfgCapture();
+      settings.saveNow();
+    } else if (arg != nullptr && strcmp(arg, "reset") == 0) {
+      settings.resetToDefaults();
+      applyLoadedSettings();
+    } else {
+      cfgCapture();
+      const AppSettingsData &d = settings.data();
+      Serial.printf(
+          "[cfg] mode=%u gain=%.2f bright=%u auto=%u cyc=%lu frm=%lu "
+          "atk=%.2f dec=%.2f peak=%.3f al=%u labels=%u pot=%u "
+          "eq=%.2f/%.2f/%.2f\n",
+          d.mode, d.gain, d.brightness, d.autoCycle ? 1 : 0,
+          static_cast<unsigned long>(d.cycleMs), static_cast<unsigned long>(d.frameMs),
+          d.attack, d.decay, d.peakDecay, d.autoLevel ? 1 : 0, d.freqLabels ? 1 : 0,
+#if !defined(BOARD_CARDPUTER_ADV)
+          d.potEnabled ? 1 : 0,
+#else
+          0,
+#endif
+          d.bassGain, d.midGain, d.trebleGain);
+    }
     return;
   }
   if (strcmp(cmd, "status") == 0 || cmd[0] == 's') {
@@ -534,9 +720,10 @@ void setup() {
   Serial.println();
   Serial.printf("[boot] %s vfx modes=%u\n", BOARD_NAME,
                 static_cast<unsigned>(VfxMode::Count));
+  settings.begin();
 
 #if defined(BOARD_CARDPUTER_ADV)
-  if (!display.begin(255)) {
+  if (!display.begin(settings.data().brightness)) {
     Serial.println(F("[boot] TFT init failed"));
     while (true) {
       delay(1000);
@@ -549,7 +736,7 @@ void setup() {
     }
   }
 #else
-  if (!display.begin(255)) {
+  if (!display.begin(settings.data().brightness)) {
     Serial.println(F("[boot] display init failed"));
     while (true) {
       delay(1000);
@@ -596,9 +783,16 @@ void setup() {
 #if !defined(BOARD_CARDPUTER_ADV)
   encoder.begin();
   gainPot.begin();
-  audioMic.setGain(gainPot.gain());
 #endif
 
+  if (settings.loaded()) {
+    applyLoadedSettings();
+  } else {
+#if !defined(BOARD_CARDPUTER_ADV)
+    audioMic.setGain(gainPot.gain());
+#endif
+    cfgCapture();
+  }
   delay(400);
   lastModeCycleMs = millis();
   memset(sampleBuffer, 0, sizeof(sampleBuffer));
@@ -635,6 +829,7 @@ void setup() {
 
 void loop() {
   handleSerial();
+  settings.poll();
 #if defined(BOARD_CARDPUTER_ADV)
   handleCardputerInput();
 #else
@@ -645,6 +840,7 @@ void loop() {
   if (autoCycleEnabled && g_cycleMs > 0 && now - lastModeCycleMs >= g_cycleMs) {
     display.nextMode();
     lastModeCycleMs = now;
+    cfgTouch();
   }
 
   uint32_t t0 = micros();
@@ -679,11 +875,6 @@ void loop() {
       levels = smoothMirror;
       peaks = peakMirror;
       count = SPECTRUM_BARS;
-      break;
-    case VfxMode::Waterfall:
-      levels = frame.waterfallRow;
-      peaks = frame.waterfallRow;
-      count = VFX_WATERFALL_BINS;
       break;
     case VfxMode::LinePeaks:
       levels = smoothBars;

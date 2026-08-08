@@ -45,9 +45,12 @@ class VfxRenderer {
   void clearPlotArea();
 
   void setShowFreqLabels(bool on);
-  bool showFreqLabels() const { return showFreqLabels_; }
+  bool showFreqLabels() const {
+    return pendingFreqLabelsDirty_ ? pendingFreqLabels_ : showFreqLabels_;
+  }
 
  private:
+  void applyPendingFreqLabels_();
   uint16_t heatColor_(float level) const;
   uint16_t rainbowColor_(float level, float hue) const;
   uint16_t darken_(uint16_t color, float factor) const;
@@ -86,7 +89,9 @@ class VfxRenderer {
   int prevBarH_[64] = {};
   int prevPeakH_[64] = {};
   int lastBarLabelCount_ = -1;
-  bool showFreqLabels_ = true;
+  bool showFreqLabels_ = false;
+  bool pendingFreqLabels_ = false;
+  bool pendingFreqLabelsDirty_ = false;
   bool prevVuSegLit_[32] = {};
   int prevLineX_[64] = {};
   int prevLineY_[64] = {};

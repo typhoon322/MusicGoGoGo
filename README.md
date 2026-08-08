@@ -82,7 +82,7 @@ pio device monitor
 | `d` / `debug` | 开关 mic 调试浮层（仅 Cardputer） |
 | `h` / `help` / `?` | 打印命令表 |
 
-模式编号：0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks 7=Bounce 8=Dot 9=Glow 10=Ring
+模式编号：0=Bars 1=Log 2=Mirror 3=VU 4=Rainbow 5=LinePeaks 6=Bounce 7=Dot 8=Glow 9=Ring
 
 ## VFX 模式
 
@@ -90,9 +90,8 @@ pio device monitor
 |------|------|
 | Bars 32 | 32 柱 + peak 落点（S3 默认 3px 间隙） |
 | Log 12 | 12 段对数宽柱 |
-| Mirror | 中心对称镜面 + 彩虹 |
+| Mirror | 中心对称镜面 + 彩虹（3px 间隙） |
 | VU Meter | 24 段电平表 + 迷你频谱 |
-| Waterfall | 热力瀑布图（纵向铺满绘图区） |
 | Rainbow | 彩虹柱 + 色相滚动 |
 | Line Peaks | 折线峰值 |
 | Bounce | 弹性柱 + 弹簧阻尼 |
