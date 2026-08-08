@@ -104,6 +104,26 @@ a{color:var(--acc)}
 <label>背光亮度 <b id="v-bright"></b></label>
 <input type="range" id="bright" min="0" max="255" step="1">
 </div>
+<div class="switch"><label>显示频率标注</label><input type="checkbox" id="flabels"></div>
+</div>
+
+<div class="card">
+<h2>12 段对数频带参考</h2>
+<table style="width:100%;border-collapse:collapse;font-size:12px">
+<tr style="color:var(--dim);text-align:left"><th style="padding:4px 0">段</th><th>约 Hz</th><th>听感 / 乐器</th></tr>
+<tr><td>1</td><td>~60–90</td><td>低音鼓、贝斯根基</td></tr>
+<tr><td>2</td><td>~90–130</td><td>贝斯琴体、踢鼓冲击</td></tr>
+<tr><td>3</td><td>~130–200</td><td>男低音、大提琴</td></tr>
+<tr><td>4</td><td>~200–300</td><td>男声胸腔、吉他低弦</td></tr>
+<tr><td>5</td><td>~300–450</td><td>人声基频、钢琴中低</td></tr>
+<tr><td>6</td><td>~450–700</td><td>人声主体、吉他中频</td></tr>
+<tr><td>7</td><td>~700–1.1k</td><td>鼻音/存在感、小号</td></tr>
+<tr><td>8</td><td>~1.1–1.7k</td><td>人声清晰度、弦乐</td></tr>
+<tr><td>9</td><td>~1.7–2.6k</td><td>齿音前区、电吉他咬感</td></tr>
+<tr><td>10</td><td>~2.6–4k</td><td>齿音、镲片起始</td></tr>
+<tr><td>11</td><td>~4–6.5k</td><td>空气感、镲片闪亮</td></tr>
+<tr><td>12</td><td>~6.5–10k+</td><td>超高频空气、嘶声</td></tr>
+</table>
 </div>
 
 <div class="foot">连接至 AP <span id="ssid"></span> · 控制页自动刷新</div>
@@ -135,6 +155,7 @@ async function state(){
     $('bright').value=s.brightness;$('v-bright').textContent=s.brightness;
     $('auto').checked=s.autoCycle;
     $('alevel').checked=s.autoLevel;
+    $('flabels').checked=!!s.freqLabels;
   }catch(e){}
 }
 function paintModes(cur){
@@ -165,6 +186,7 @@ bind('cycle','input',v=>v);
 bind('bright','input',v=>v);
 $('auto').addEventListener('change',e=>ctrl('auto='+(e.target.checked?1:0)));
 $('alevel').addEventListener('change',e=>ctrl('alevel='+(e.target.checked?1:0)));
+$('flabels').addEventListener('change',e=>ctrl('freqLabels='+(e.target.checked?1:0)));
 state();setInterval(state,500);
 </script>
 </body>
@@ -238,6 +260,7 @@ void WebUi::startServer_() {
     json += ",\"attack\":" + String(cb_.getAttack(), 3);
     json += ",\"peakDecay\":" + String(cb_.getPeakDecay(), 3);
     json += ",\"autoLevel\":" + String(cb_.getAutoLevel() ? 1 : 0);
+    json += ",\"freqLabels\":" + String(cb_.getFreqLabels() ? 1 : 0);
     json += ",\"uptime\":" + String(cb_.getUptimeMs() / 1000);
     json += "}";
     request->send(200, "application/json", json);
@@ -273,6 +296,9 @@ void WebUi::startServer_() {
     }
     if (request->hasParam("alevel")) {
       cb_.setAutoLevel(request->arg("alevel").toInt() != 0);
+    }
+    if (request->hasParam("freqLabels")) {
+      cb_.setFreqLabels(request->arg("freqLabels").toInt() != 0);
     }
     request->send(200, "application/json", "{\"ok\":true}");
   });

@@ -16,6 +16,14 @@ const char *vfxModeName(VfxMode mode) {
       return "Rainbow";
     case VfxMode::LinePeaks:
       return "Line Peaks";
+    case VfxMode::Bounce:
+      return "Bounce";
+    case VfxMode::Dot:
+      return "Dot";
+    case VfxMode::Glow:
+      return "Glow";
+    case VfxMode::Ring:
+      return "Ring";
     default:
       return "?";
   }

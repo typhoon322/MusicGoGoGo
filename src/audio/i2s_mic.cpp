@@ -65,8 +65,8 @@ void I2sMic::end() {
 }
 
 void I2sMic::setGain(float gain) {
-  if (gain < 0.1f) {
-    gain = 0.1f;
+  if (gain < 0.05f) {
+    gain = 0.05f;
   }
   if (gain > 32.0f) {
     gain = 32.0f;

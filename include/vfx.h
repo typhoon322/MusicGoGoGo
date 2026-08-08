@@ -13,6 +13,10 @@ enum class VfxMode : uint8_t {
   Waterfall,     // 瀑布图 / 频谱图
   Rainbow,       // 彩虹色柱 + 色相滚动
   LinePeaks,     // 折线峰值
+  Bounce,        // 弹性柱 + 弹簧 peak
+  Dot,           // 星点频谱
+  Glow,          // 辉光柱
+  Ring,          // 环形放射
   Count
 };
 

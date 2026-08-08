@@ -44,10 +44,13 @@ class VfxRenderer {
   void resetBarCache();
   void clearPlotArea();
 
+  void setShowFreqLabels(bool on);
+  bool showFreqLabels() const { return showFreqLabels_; }
+
  private:
   uint16_t heatColor_(float level) const;
   uint16_t rainbowColor_(float level, float hue) const;
-  uint16_t gradientBarColor_(float level) const;
+  uint16_t darken_(uint16_t color, float factor) const;
   void drawHeader_(const VfxDrawContext &ctx);
 #if defined(BOARD_CARDPUTER_ADV)
   void drawBatteryBadge_(const VfxDrawContext &ctx);
@@ -59,6 +62,10 @@ class VfxRenderer {
   void drawVu_(int top, int bottom, const VfxDrawContext &ctx, const float *levels, size_t count);
   void drawWaterfall_(int top, int bottom, const float *row, float *history, size_t &head);
   void drawLinePeaks_(int top, int bottom, const float *levels, size_t count);
+  void drawBounce_(int top, int bottom, const float *levels, const float *peaks, size_t count);
+  void drawDot_(int top, int bottom, const float *levels, size_t count);
+  void drawGlow_(int top, int bottom, const float *levels, const float *peaks, size_t count);
+  void drawRing_(int top, int bottom, const VfxDrawContext &ctx, const float *levels, size_t count);
   void drawPlotMode_(const VfxDrawContext &ctx, VfxMode mode, const float *levels,
                      const float *peaks, size_t count, float *waterfallHistory,
                      size_t &waterfallHead);
@@ -78,10 +85,18 @@ class VfxRenderer {
   float lastHeaderPeak_ = -1.0f;
   int prevBarH_[64] = {};
   int prevPeakH_[64] = {};
+  int lastBarLabelCount_ = -1;
+  bool showFreqLabels_ = true;
   bool prevVuSegLit_[32] = {};
   int prevLineX_[64] = {};
   int prevLineY_[64] = {};
   bool prevLineValid_ = false;
   bool vuInit_ = false;
   bool areaInit_ = false;
+  float bounceH_[64] = {};
+  float bounceVel_[64] = {};
+  int prevDotY_[64] = {};
+  int prevDotR_[64] = {};
+  int prevSpokeLen_[64] = {};
+  bool ringInit_ = false;
 };

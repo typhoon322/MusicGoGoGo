@@ -33,6 +33,9 @@ class DisplayDriver {
 
   uint8_t backlightLevel() const { return backlightLevel_; }
 
+  void setShowFreqLabels(bool on);
+  bool showFreqLabels() const;
+
 #if defined(BOARD_CARDPUTER_ADV)
   void toggleDebugOverlay();
   bool debugOverlay() const { return debugOverlay_; }

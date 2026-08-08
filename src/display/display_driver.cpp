@@ -53,7 +53,10 @@ bool DisplayDriver::begin(uint8_t backlightLevel) {
   digitalWrite(PIN_TFT_RST, HIGH);
   delay(20);
 
-  pinMode(PIN_TFT_BL, OUTPUT);
+  // ESP32-S3 backlight via LEDC PWM (analogWrite alone is a no-op until a
+  // channel is attached). 8-bit resolution, ~5 kHz, channel 0.
+  ledcSetup(0, 5000, 8);
+  ledcAttachPin(PIN_TFT_BL, 0);
   setBacklight(backlightLevel);
 
 #if defined(BOARD_CARDPUTER_ADV)
@@ -69,6 +72,10 @@ bool DisplayDriver::begin(uint8_t backlightLevel) {
     tft.setAddrWindow(TFT_X_OFFSET, TFT_Y_OFFSET, TFT_WIDTH, TFT_HEIGHT);
   }
   tft.setRotation(1);
+  // This 3.2" ST7789 panel does not want the inversion the library forces
+  // (INVON); without INVOFF the whole frame is color-inverted (black bg ->
+  // white, green bars -> purple).  Send INVOFF so black stays black.
+  tft.invertDisplay(false);
   tft.fillScreen(TFT_COL_BLACK);
   tft.setTextWrap(false);
   tft.setSPISpeed(20000000);
@@ -87,8 +94,16 @@ void DisplayDriver::setBacklight(uint8_t level) {
 #elif defined(BOARD_CARDPUTER_ADV)
   digitalWrite(PIN_TFT_BL, level > 0 ? HIGH : LOW);
 #else
-  analogWrite(PIN_TFT_BL, level);
+  ledcWrite(0, level);
 #endif
+}
+
+void DisplayDriver::setShowFreqLabels(bool on) {
+  vfx.setShowFreqLabels(on);
+}
+
+bool DisplayDriver::showFreqLabels() const {
+  return vfx.showFreqLabels();
 }
 
 void DisplayDriver::nextMode() {

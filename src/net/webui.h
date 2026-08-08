@@ -30,6 +30,9 @@ struct WebCallbacks {
   bool (*getAutoLevel)() = nullptr;
   void (*setAutoLevel)(bool) = nullptr;
 
+  bool (*getFreqLabels)() = nullptr;
+  void (*setFreqLabels)(bool) = nullptr;
+
   float (*getFps)() = nullptr;
   float (*getVu)() = nullptr;
   float (*getRms)() = nullptr;

@@ -70,29 +70,37 @@ pio device monitor
 | `n` / `next` | 下一个 VFX |
 | `p` / `prev` | 上一个 VFX |
 | `m` / `mode` | 显示当前模式 |
-| `m 2` / `mode next` / `mode prev` | 跳转到指定模式 0–6，或上/下一个 |
+| `m 2` / `mode next` / `mode prev` | 跳转到指定模式 0–10，或上/下一个 |
 | `g` / `gain` | 显示当前增益 |
 | `g 3.0` | 直接设置增益（自动禁用增益电位器） |
 | `g+` / `g-` / `+` / `-` | 增益 ±0.25（自动禁用增益电位器） |
 | `pot [on\|off]` | 恢复/关闭增益电位器控制（仅 S3） |
+| `fl` / `labels [on\|off]` | TFT 频率标注（仅 S3） |
+| `al [on\|off]` | 自动电平 AGC |
 | `a` / `auto [on\|off]` | 切换/设置自动轮播 |
 | `s` / `status` | 打印状态与耗时统计 |
 | `d` / `debug` | 开关 mic 调试浮层（仅 Cardputer） |
 | `h` / `help` / `?` | 打印命令表 |
 
-模式编号：0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks
+模式编号：0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks 7=Bounce 8=Dot 9=Glow 10=Ring
 
 ## VFX 模式
 
 | 模式 | 效果 |
 |------|------|
-| Bars 32 | 32 柱 + 渐变 + peak 落点 |
+| Bars 32 | 32 柱 + peak 落点（S3 默认 3px 间隙） |
 | Log 12 | 12 段对数宽柱 |
 | Mirror | 中心对称镜面 + 彩虹 |
 | VU Meter | 24 段电平表 + 迷你频谱 |
-| Waterfall | 热力瀑布图 |
+| Waterfall | 热力瀑布图（纵向铺满绘图区） |
 | Rainbow | 彩虹柱 + 色相滚动 |
 | Line Peaks | 折线峰值 |
+| Bounce | 弹性柱 + 弹簧阻尼 |
+| Dot | 星点频谱 |
+| Glow | 辉光柱 |
+| Ring | 环形放射 + 中心 VU |
+
+中文更新说明见 [`docs/vfx-effects-2026-08-09.zh.md`](docs/vfx-effects-2026-08-09.zh.md)。
 
 ## 工程结构
 

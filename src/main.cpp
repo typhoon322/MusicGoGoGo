@@ -146,6 +146,12 @@ static void wbSetAutoLevel(bool b) {
   bandLog.setAutoLevelEnabled(b);
   bandMirror.setAutoLevelEnabled(b);
 }
+static bool wbGetFreqLabels() {
+  return display.showFreqLabels();
+}
+static void wbSetFreqLabels(bool b) {
+  display.setShowFreqLabels(b);
+}
 static float wbGetFps() {
   const uint32_t elapsed = millis();
   return elapsed > 0 ? frameCount * 1000.0f / static_cast<float>(elapsed) : 0.0f;
@@ -190,6 +196,8 @@ static void setupWebUi() {
   cb.setPeakDecay = wbSetPeakDecay;
   cb.getAutoLevel = wbGetAutoLevel;
   cb.setAutoLevel = wbSetAutoLevel;
+  cb.getFreqLabels = wbGetFreqLabels;
+  cb.setFreqLabels = wbSetFreqLabels;
   cb.getFps = wbGetFps;
   cb.getVu = wbGetVu;
   cb.getRms = wbGetRms;
@@ -329,13 +337,15 @@ static void printSerialHelp() {
   Serial.println(F("=== MusicGoGoGo serial commands ==="));
   Serial.println(F("n / next          next effect"));
   Serial.println(F("p / prev          previous effect"));
-  Serial.println(F("m / mode [n]      show effect, or jump: 0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks"));
+  Serial.println(F("m / mode [n]      show effect, or jump: 0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks 7=Bounce 8=Dot 9=Glow 10=Ring"));
   Serial.println(F("g / gain [val]    show mic gain, or set: g 3.0 / g+ / g-"));
   Serial.println(F("+ / -             gain step (+/-0.25)"));
 #if !defined(BOARD_CARDPUTER_ADV)
   Serial.println(F("pot [on|off]      gain pot control (set gain via serial disables it)"));
+  Serial.println(F("fl / labels [on|off]  TFT frequency labels"));
 #endif
   Serial.println(F("a / auto [on|off] toggle auto-cycle"));
+  Serial.println(F("al [on|off]       auto level (AGC) on/off"));
   Serial.println(F("s / status        print status"));
   Serial.println(F("d / debug         toggle debug overlay (Cardputer)"));
   Serial.println(F("h / help / ?      this help"));
@@ -436,7 +446,33 @@ static void parseSerialCommand(char *line) {
     }
     return;
   }
+  if (strcmp(cmd, "labels") == 0 || strcmp(cmd, "fl") == 0) {
+    if (arg != nullptr && strcmp(arg, "on") == 0) {
+      display.setShowFreqLabels(true);
+    } else if (arg != nullptr && strcmp(arg, "off") == 0) {
+      display.setShowFreqLabels(false);
+    }
+    Serial.printf("[cmd] freq labels %s\n", display.showFreqLabels() ? "ON" : "OFF");
+    return;
+  }
 #endif
+  if (strcmp(cmd, "alevel") == 0 || strcmp(cmd, "al") == 0) {
+    if (arg != nullptr && strcmp(arg, "on") == 0) {
+      bandLinear.setAutoLevelEnabled(true);
+      bandLog.setAutoLevelEnabled(true);
+      bandMirror.setAutoLevelEnabled(true);
+      Serial.println(F("[cmd] auto level ON"));
+    } else if (arg != nullptr && strcmp(arg, "off") == 0) {
+      bandLinear.setAutoLevelEnabled(false);
+      bandLog.setAutoLevelEnabled(false);
+      bandMirror.setAutoLevelEnabled(false);
+      Serial.println(F("[cmd] auto level OFF"));
+    } else {
+      Serial.printf("[cmd] auto level %s\n",
+                    bandLinear.autoLevelEnabled() ? "ON" : "OFF");
+    }
+    return;
+  }
   if (strcmp(cmd, "auto") == 0 || cmd[0] == 'a') {
     if (arg != nullptr && strcmp(arg, "on") == 0) {
       autoCycleEnabled = true;
