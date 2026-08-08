@@ -31,6 +31,8 @@ class DisplayDriver {
   void nextMode();
   void prevMode();
 
+  uint8_t backlightLevel() const { return backlightLevel_; }
+
 #if defined(BOARD_CARDPUTER_ADV)
   void toggleDebugOverlay();
   bool debugOverlay() const { return debugOverlay_; }

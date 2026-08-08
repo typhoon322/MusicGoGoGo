@@ -79,19 +79,27 @@ bool I2sMic::readSamples(int16_t *out, size_t count) {
     return false;
   }
 
+  int32_t *buf = static_cast<int32_t *>(malloc(count * sizeof(int32_t)));
+  if (buf == nullptr) {
+    return false;
+  }
+
+  size_t bytesRead = 0;
+  const esp_err_t err =
+      i2s_read(I2S_PORT, buf, count * static_cast<size_t>(sizeof(int32_t)), &bytesRead,
+               portMAX_DELAY);
+  if (err != ESP_OK) {
+    free(buf);
+    return false;
+  }
+
+  const size_t n = bytesRead / sizeof(int32_t);
   double sumSq = 0.0;
   float peak = 0.0f;
 
   for (size_t i = 0; i < count; ++i) {
-    int32_t raw = 0;
-    size_t bytesRead = 0;
-    const esp_err_t err =
-        i2s_read(I2S_PORT, &raw, sizeof(raw), &bytesRead, portMAX_DELAY);
-    if (err != ESP_OK || bytesRead != sizeof(raw)) {
-      return false;
-    }
-
-    float sample = static_cast<float>(rawToPcm(raw)) * gain_;
+    float sample =
+        static_cast<float>(rawToPcm(i < n ? buf[i] : 0)) * gain_;
     if (sample > 32767.0f) {
       sample = 32767.0f;
     }
@@ -106,6 +114,7 @@ bool I2sMic::readSamples(int16_t *out, size_t count) {
     }
     sumSq += static_cast<double>(sample) * static_cast<double>(sample);
   }
+  free(buf);
 
   lastPeak_ = peak / 32768.0f;
   lastRms_ = static_cast<float>(sqrt(sumSq / static_cast<double>(count))) / 32768.0f;

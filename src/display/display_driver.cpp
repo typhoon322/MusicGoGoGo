@@ -71,9 +71,7 @@ bool DisplayDriver::begin(uint8_t backlightLevel) {
   tft.setRotation(1);
   tft.fillScreen(TFT_COL_BLACK);
   tft.setTextWrap(false);
-#if defined(BOARD_CARDPUTER_ADV)
   tft.setSPISpeed(20000000);
-#endif
   vfx.attach(&tft);
   vfx.resetBarCache();
   initialized_ = true;

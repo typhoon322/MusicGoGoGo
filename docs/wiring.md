@@ -23,12 +23,12 @@
 | I2S BCK | 4 | INMP441 SCK |
 | I2S WS (LRCK) | 5 | INMP441 WS |
 | I2S SD (DIN) | 6 | INMP441 SD → ESP32 输入 |
-| SPI MOSI | 11 | ST7789 SDI |
-| SPI SCK | 12 | ST7789 SCK |
-| TFT CS | 10 | 片选 |
-| TFT DC | 13 | 数据/命令 |
-| TFT RST | 14 | 复位 |
-| TFT BL | 3 | 背光（高电平亮） |
+| SPI MOSI | 11 | ST7789 SDA（丝印 SDA） |
+| SPI SCK | 12 | ST7789 SCL（丝印 SCL） |
+| TFT CS | 10 | 片选（丝印 CS） |
+| TFT DC | 13 | 数据/命令（丝印 DC） |
+| TFT RST | 14 | 复位（丝印 RES） |
+| TFT BL | 3 | 背光（丝印 BLK） |
 | ENC CLK | 8 | KY-040 CLK |
 | ENC DT | 9 | KY-040 DT |
 | ENC SW | 15 | KY-040 按键（接 GND） |
@@ -71,16 +71,16 @@ GND  ─────────────────────────
 
 ## ST7789 TFT（SPI）
 
-| TFT | ESP32-S3 |
+| TFT 丝印 | ESP32-S3 |
 |-----|----------|
 | VCC | 3.3V（**勿接 5V**） |
 | GND | GND |
 | CS | GPIO 10 |
-| RESET | GPIO 14 |
-| DC / RS | GPIO 13 |
-| MOSI / SDI | GPIO 11 |
-| SCK | GPIO 12 |
-| LED / BL | GPIO 3 |
+| RES | GPIO 14 |
+| DC | GPIO 13 |
+| SDA | GPIO 11 |
+| SCL | GPIO 12 |
+| BLK | GPIO 3 |
 | MISO | 不接（4-wire SPI） |
 
 ```
@@ -89,12 +89,14 @@ ESP32-S3                         ST7789
 3.3V ─────────────────────────→ VCC
 GND  ─────────────────────────→ GND
 GPIO 10 ──────────────────────→ CS
-GPIO 14 ──────────────────────→ RESET
+GPIO 14 ──────────────────────→ RES
 GPIO 13 ──────────────────────→ DC
-GPIO 11 (MOSI) ───────────────→ SDI
-GPIO 12 (SCK)  ───────────────→ SCK
-GPIO 3 ───────────────────────→ BL
+GPIO 11 (MOSI) ───────────────→ SDA
+GPIO 12 (SCK)  ───────────────→ SCL
+GPIO 3 ───────────────────────→ BLK
 ```
+
+> 模块丝印为 **SCL / SDA / RES / DC / CS / BLK**：`SCL`=时钟、`SDA`=数据、`RES`=复位、`BLK`=背光，与 ESP32 的 SPI 命名 SCK / MOSI 对应。
 
 横屏显示：`setRotation(1)` → 320×240。若画面偏移，改 `board_s3.h` 中 `TFT_Y_OFFSET`。
 
@@ -222,16 +224,16 @@ Cardputer 固件 **默认关闭自动轮播**。
 
 ### EXT 14P → ST7789
 
-| TFT 模块 | Cardputer GPIO | EXT 排针 | 说明 |
+| TFT 丝印 | Cardputer GPIO | EXT 排针 | 说明 |
 |----------|----------------|----------|------|
 | VCC | **5V IN** | **pin 2** | EXT 标注为 5V IN；多数 2.4" 模块板载 LDO 可接此脚；**仅 3.3V 模块勿接** |
 | GND | GND | pin 4 | 共地 |
-| SCK | 40 | pin 7 | SPI 时钟 |
-| MOSI / SDI | 14 | pin 9 | SPI 数据 |
+| SCL | 40 | pin 7 | SPI 时钟 |
+| SDA | 14 | pin 9 | SPI 数据 |
 | CS | 5 | pin 13 | 片选 |
-| DC / RS | 6 | pin 5 | 数据/命令 |
-| RESET | 3 | pin 1 | 复位 |
-| BL | 15 | pin 14 | 背光（高电平亮） |
+| DC | 6 | pin 5 | 数据/命令 |
+| RES | 3 | pin 1 | 复位 |
+| BLK | 15 | pin 14 | 背光（高电平亮） |
 | MISO | — | — | 4-wire SPI 不接 |
 
 ### EXT 14P 按 pin 顺序（接 ST7789）
@@ -248,20 +250,20 @@ Cardputer 固件 **默认关闭自动轮播**。
 
 | Pin | 排 | 丝印 / GPIO | 官方功能 | 接 ST7789 |
 |-----|----|-------------|----------|-----------|
-| 1 | **上** | G3 | RESET | **RESET** |
+| 1 | **上** | G3 | RESET | **RES** |
 | 2 | **下** | 5V IN | 5VIN | **VCC** |
 | 3 | **上** | G4 | INT | 不接 |
 | 4 | **下** | GND | GND | **GND** |
-| 5 | **上** | G6 | BUSY | **DC / RS** |
+| 5 | **上** | G6 | BUSY | **DC** |
 | 6 | **下** | 5VOUT | 5V 输出 | 不接 |
-| 7 | **上** | G40 | SCK | **SCK**（屏上常标 **SCL** / CLK） |
+| 7 | **上** | G40 | SCK | **SCL**（屏上丝印 SCL） |
 | 8 | **下** | G8 | I2C_SDA | 不接 |
-| 9 | **上** | G14 | MOSI | **SDI / MOSI**（屏上常标 **SDA**） |
+| 9 | **上** | G14 | MOSI | **SDA**（屏上丝印 SDA） |
 | 10 | **下** | G9 | I2C_SCL | 不接 |
 | 11 | **上** | G39 | MISO | 不接（4-wire SPI） |
 | 12 | **下** | G13 | UART_RX | 不接 |
 | 13 | **上** | G5 | CS | **CS** |
-| 14 | **下** | G15 | UART_TX | **BL**（背光） |
+| 14 | **下** | G15 | UART_TX | **BLK**（背光） |
 
 ```
 EXT 14P → ST7789（上排 = 奇数 pin，下排 = 偶数 pin；● = 要接）
@@ -271,29 +273,29 @@ EXT 14P → ST7789（上排 = 奇数 pin，下排 = 偶数 pin；● = 要接）
 上排  G3      G4      G6      G40     G14     G39     G5
 pin   1       3       5       7       9       11      13
       ●       ·       ●       ●       ●       ·       ●
-      RESET           DC      SCK     MOSI            CS
+      RES             DC      SCL     SDA             CS
 
 下排  5V IN   GND     5VOUT   G8      G9      G13     G15
 pin   2       4       6       8       10      12      14
       ●       ●       ·       ·       ·       ·       ●
-      VCC     GND                                     BL
+      VCC     GND                                     BLK
 
-共 8 线：上排 RESET / DC / SCK / MOSI / CS；下排 VCC / GND / BL
+共 8 线：上排 RES / DC / SCL / SDA / CS；下排 VCC / GND / BLK
 ```
 
-> 屏模块若印 **SCL / SDA**，在 4-wire SPI 模式下分别接 **SCK / MOSI**（不是 EXT 下排的 I2C G8/G9）。
+> 屏模块丝印为 **SCL / SDA**：在 4-wire SPI 模式下分别接 **SCK / MOSI**（不是 EXT 下排的 I2C G8/G9）。
 
 ```
 Cardputer EXT                     ST7789 2.4"
 ─────────────                     ────────────
 pin 2  5V IN ───────────────────→ VCC
 pin 4  GND  ───────────────────→ GND
-pin 7  G40  ───────────────────→ SCK
-pin 9  G14  ───────────────────→ SDI / MOSI
+pin 7  G40  ───────────────────→ SCL
+pin 9  G14  ───────────────────→ SDA
 pin 13 G5   ───────────────────→ CS
 pin 5  G6   ───────────────────→ DC
-pin 1  G3   ───────────────────→ RESET
-pin 14 G15  ───────────────────→ BL
+pin 1  G3   ───────────────────→ RES
+pin 14 G15  ───────────────────→ BLK
 ```
 
 > EXT SPI 与 microSD 共用 40/14 总线；外接 CS 用 GPIO5，与 SD 片选 GPIO12 不冲突。  

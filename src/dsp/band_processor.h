@@ -16,6 +16,11 @@ class BandProcessor {
   void setDecay(float decay) { decay_ = decay; }
   void setPeakDecay(float decay) { peakDecay_ = decay; }
 
+  bool autoLevelEnabled() const { return autoLevelEnabled_; }
+  float attack() const { return attack_; }
+  float decay() const { return decay_; }
+  float peakDecay() const { return peakDecay_; }
+
   // input/output length == bandCount, values 0..1
   void process(const float *input, float *output);
   const float *peaks() const { return peaks_; }

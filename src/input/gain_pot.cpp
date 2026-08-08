@@ -19,6 +19,9 @@ void GainPot::begin() {
 }
 
 void GainPot::poll() {
+  if (!enabled_) {
+    return;
+  }
   const int raw = analogRead(PIN_GAIN_POT);
   filtered_ = filtered_ * 0.82f + static_cast<float>(raw) * 0.18f;
 

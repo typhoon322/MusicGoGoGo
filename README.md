@@ -13,7 +13,7 @@
 
 | 组件 | 说明 |
 |------|------|
-| MCU | ESP32-S3 DevKitC-1（8MB Flash + OPI PSRAM） |
+| MCU | ESP32-S3 N16R8 DevKitC-1（16MB Flash + 8MB OPI PSRAM） |
 | 音频输入 | INMP441 I2S 数字麦克风 |
 | 显示 | ST7789 TFT 3.2"（320×240，SPI） |
 | 输入 | KY-040 旋转编码器、10kΩ 增益电位器 |
@@ -29,7 +29,7 @@ pio run -e esp32-s3-dev -t upload
 pio device monitor
 ```
 
-上电后 **7 种 VFX 自动轮播**（12 秒/模式，可在 `config.h` 关闭）。
+上电进入 Bars 模式；可用串口命令或编码器切换效果（自动轮播默认关闭，输入 `a` 或按下编码器开启）。
 
 ### Cardputer ADV 验证固件
 
@@ -49,7 +49,7 @@ pio device monitor
 | 编码器旋转 | 上 / 下一个 VFX |
 | 编码器按下 | 开关自动轮播 |
 | 电位器 | 麦克风增益（0.4–8×） |
-| 串口 `n`/`p`/`a` | 备用控制 |
+| 串口 | 完整命令见下方「串口命令」 |
 
 ### Cardputer ADV
 
@@ -60,6 +60,27 @@ pio device monitor
 | `,` / `.` | 上 / 下一个 VFX |
 | `[` / `]` | 增益 ±0.25 |
 | 顶栏右上 | 电池电量 |
+
+## 串口命令
+
+两套目标均支持串口（115200）行式命令，用于外接串口调试工具（如 Cardputer）：
+
+| 命令 | 功能 |
+|------|------|
+| `n` / `next` | 下一个 VFX |
+| `p` / `prev` | 上一个 VFX |
+| `m` / `mode` | 显示当前模式 |
+| `m 2` / `mode next` / `mode prev` | 跳转到指定模式 0–6，或上/下一个 |
+| `g` / `gain` | 显示当前增益 |
+| `g 3.0` | 直接设置增益（自动禁用增益电位器） |
+| `g+` / `g-` / `+` / `-` | 增益 ±0.25（自动禁用增益电位器） |
+| `pot [on\|off]` | 恢复/关闭增益电位器控制（仅 S3） |
+| `a` / `auto [on\|off]` | 切换/设置自动轮播 |
+| `s` / `status` | 打印状态与耗时统计 |
+| `d` / `debug` | 开关 mic 调试浮层（仅 Cardputer） |
+| `h` / `help` / `?` | 打印命令表 |
+
+模式编号：0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks
 
 ## VFX 模式
 
@@ -110,7 +131,7 @@ MusicGoGoGo/
 | `CARDPUTER_MIC_GAIN` | `board_cardputer_adv.h` | — | 2.0 |
 | `FFT_SIZE` | `board_*.h` | 512 | 512 |
 | `SPECTRUM_BARS` | `board_*.h` | 32 | 32 |
-| `VFX_AUTO_CYCLE_MS` | `board_*.h` / `config.h` | 12000 | 0（关） |
+| `VFX_AUTO_CYCLE_MS` | `board_*.h` / `config.h` | 0（关，board_s3.h 覆盖） | 0（关） |
 | `SPECTRUM_FRAME_MS` | `config.h` / board | 25 | 32 |
 
 ## 文档索引

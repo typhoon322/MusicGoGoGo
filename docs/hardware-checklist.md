@@ -19,18 +19,18 @@
 | 2 | 烧录 `esp32-s3-dev` 并打开串口监视器 | 115200 有输出 |
 | 3 | 查看启动日志 | `Board: MusicGoGoGo`；TFT 初始化成功 |
 | 4 | 查看 TFT | 背光亮；填色或测试图案正常显示 |
-| 5 | 检查接线 | VCC 为 3.3V（非 5V）；CS=10, DC=13, RST=14, MOSI=11, SCK=12, BL=3 |
+| 5 | 检查接线 | VCC 为 3.3V（非 5V）；CS=10, DC=13, RES=14, SDA=11, SCL=12, BLK=3 |
 
 **若 TFT 无显示：**
 
 - 检查 SPI 引脚与 [wiring.md](wiring.md) 对照表
 - 确认 VCC 接 3.3V（**勿接 5V**）
-- 确认 BL 接 GPIO 3 且固件已拉高背光
-- 尝试对调 MOSI/SCK 或检查 CS / DC 是否接反
+- 确认 BLK 接 GPIO 3 且固件已拉高背光
+- 尝试对调 SDA/SCL 或检查 CS / DC 是否接反
 
 **若背光不亮：**
 
-- 部分模块 BL 需接 3.3V 常亮（改接 VCC 或确认 GPIO 3 输出高电平）
+- 部分模块 BLK 需接 3.3V 常亮（改接 VCC 或确认 GPIO 3 输出高电平）
 - 检查 GND 共地
 
 ## 第二阶段：I2S 麦克风采样

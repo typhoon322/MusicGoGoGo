@@ -64,7 +64,24 @@ SD 卡安装：将 `MusicGoGoGo.bin` 拷到 SD 卡根目录 → Cardputer **M5La
 | `[` / `]` | 麦克风增益 −0.25 / +0.25 |
 | `/` | 开关自动轮播（Cardputer 默认关闭） |
 | `d` | 开关调试浮层 |
-| 串口 `n` / `p` / `a` / `+` / `-` | 同 S3 目标备用控制 |
+| 串口 | 行式命令：`help` 查看完整命令表 |
+
+### 串口命令（115200）
+
+用 Cardputer 或其他工具经串口发送，如 `m 3`、`g 2.5`：
+
+| 命令 | 功能 |
+|------|------|
+| `n` / `next` | 下一个 VFX |
+| `p` / `prev` | 上一个 VFX |
+| `m` / `mode [n]` | 显示 / 跳转模式 0–6 |
+| `g` / `gain [val]` | 显示 / 设置增益，`g+` `g-` 步进 |
+| `a` / `auto [on\|off]` | 切换自动轮播 |
+| `s` / `status` | 状态与耗时统计 |
+| `d` / `debug` | 开关调试浮层 |
+| `h` / `help` | 命令表 |
+
+模式编号：0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks
 
 Cardputer 验证固件 **默认关闭 VFX 自动轮播**（`VFX_AUTO_CYCLE_MS 0`）。
 

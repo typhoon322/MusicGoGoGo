@@ -16,6 +16,8 @@ using AudioMic = CardputerMic;
 #include "audio/i2s_mic.h"
 #include "input/gain_pot.h"
 #include "input/rotary_encoder.h"
+#include <WiFi.h>
+#include "net/webui.h"
 using AudioMic = I2sMic;
 #endif
 
@@ -28,14 +30,14 @@ DisplayDriver display;
 #if !defined(BOARD_CARDPUTER_ADV)
 RotaryEncoder encoder;
 GainPot gainPot;
+WebUi webUi;
 #endif
 
-bool autoCycleEnabled =
-#if defined(BOARD_CARDPUTER_ADV)
-    false;
-#else
-    VFX_AUTO_CYCLE_MS > 0;
-#endif
+bool autoCycleEnabled = false;
+
+// Runtime-tunable timings (defaults from board headers)
+uint32_t g_frameMs = SPECTRUM_FRAME_MS;
+uint32_t g_cycleMs = VFX_AUTO_CYCLE_MS;
 
 int16_t sampleBuffer[FFT_SIZE];
 float smoothBars[SPECTRUM_BARS];
@@ -49,9 +51,154 @@ uint32_t lastFrameMs = 0;
 uint32_t lastStatusMs = 0;
 uint32_t lastModeCycleMs = 0;
 uint32_t frameCount = 0;
+uint32_t profReadUs = 0;
+uint32_t profFftUs = 0;
+uint32_t profBandUs = 0;
+uint32_t profRenderUs = 0;
+uint32_t profFrames = 0;
 #if defined(BOARD_CARDPUTER_ADV)
 int8_t cardputerBatteryPct = -1;
 uint32_t lastBatteryReadMs = 0;
+#endif
+
+#if !defined(BOARD_CARDPUTER_ADV)
+// ---- Web UI callbacks -----------------------------------------------------
+static uint8_t wbGetMode() {
+  return static_cast<uint8_t>(display.mode());
+}
+static void wbSetMode(uint8_t m) {
+  if (m < static_cast<uint8_t>(VfxMode::Count)) {
+    display.setMode(static_cast<VfxMode>(m));
+    lastModeCycleMs = millis();
+  }
+}
+static const char *wbGetModeName(uint8_t m) {
+  return vfxModeName(static_cast<VfxMode>(m));
+}
+static uint8_t wbGetModeCount() {
+  return static_cast<uint8_t>(VfxMode::Count);
+}
+static float wbGetGain() {
+  return audioMic.gain();
+}
+static void wbSetGain(float g) {
+  audioMic.setGain(g);
+}
+static uint8_t wbGetBrightness() {
+  return display.backlightLevel();
+}
+static void wbSetBrightness(uint8_t v) {
+  display.setBacklight(v);
+}
+static bool wbGetAutoCycle() {
+  return autoCycleEnabled;
+}
+static void wbSetAutoCycle(bool b) {
+  autoCycleEnabled = b;
+  if (b) {
+    lastModeCycleMs = millis();
+  }
+  Serial.printf("[web] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
+}
+static uint32_t wbGetCycleMs() {
+  return g_cycleMs;
+}
+static void wbSetCycleMs(uint32_t v) {
+  g_cycleMs = v;
+}
+static uint32_t wbGetFrameMs() {
+  return g_frameMs;
+}
+static void wbSetFrameMs(uint32_t v) {
+  if (v >= 10 && v <= 500) {
+    g_frameMs = v;
+  }
+}
+static float wbGetDecay() {
+  return bandLinear.decay();
+}
+static void wbSetDecay(float v) {
+  bandLinear.setDecay(v);
+  bandLog.setDecay(v);
+  bandMirror.setDecay(v);
+}
+static float wbGetAttack() {
+  return bandLinear.attack();
+}
+static void wbSetAttack(float v) {
+  bandLinear.setAttack(v);
+  bandLog.setAttack(v);
+  bandMirror.setAttack(v);
+}
+static float wbGetPeakDecay() {
+  return bandLinear.peakDecay();
+}
+static void wbSetPeakDecay(float v) {
+  bandLinear.setPeakDecay(v);
+  bandLog.setPeakDecay(v);
+  bandMirror.setPeakDecay(v);
+}
+static bool wbGetAutoLevel() {
+  return bandLinear.autoLevelEnabled();
+}
+static void wbSetAutoLevel(bool b) {
+  bandLinear.setAutoLevelEnabled(b);
+  bandLog.setAutoLevelEnabled(b);
+  bandMirror.setAutoLevelEnabled(b);
+}
+static float wbGetFps() {
+  const uint32_t elapsed = millis();
+  return elapsed > 0 ? frameCount * 1000.0f / static_cast<float>(elapsed) : 0.0f;
+}
+static float wbGetVu() {
+  return spectrum.frame().vuLevel;
+}
+static float wbGetRms() {
+  return audioMic.lastRms();
+}
+static float wbGetPeak() {
+  return audioMic.lastPeak();
+}
+static float wbGetAutoGain() {
+  return bandLinear.autoGain();
+}
+static uint32_t wbGetUptimeMs() {
+  return millis();
+}
+
+static void setupWebUi() {
+  WebCallbacks cb;
+  cb.getMode = wbGetMode;
+  cb.setMode = wbSetMode;
+  cb.getModeName = wbGetModeName;
+  cb.getModeCount = wbGetModeCount;
+  cb.getGain = wbGetGain;
+  cb.setGain = wbSetGain;
+  cb.getBrightness = wbGetBrightness;
+  cb.setBrightness = wbSetBrightness;
+  cb.getAutoCycle = wbGetAutoCycle;
+  cb.setAutoCycle = wbSetAutoCycle;
+  cb.getCycleMs = wbGetCycleMs;
+  cb.setCycleMs = wbSetCycleMs;
+  cb.getFrameMs = wbGetFrameMs;
+  cb.setFrameMs = wbSetFrameMs;
+  cb.getDecay = wbGetDecay;
+  cb.setDecay = wbSetDecay;
+  cb.getAttack = wbGetAttack;
+  cb.setAttack = wbSetAttack;
+  cb.getPeakDecay = wbGetPeakDecay;
+  cb.setPeakDecay = wbSetPeakDecay;
+  cb.getAutoLevel = wbGetAutoLevel;
+  cb.setAutoLevel = wbSetAutoLevel;
+  cb.getFps = wbGetFps;
+  cb.getVu = wbGetVu;
+  cb.getRms = wbGetRms;
+  cb.getPeak = wbGetPeak;
+  cb.getAutoGain = wbGetAutoGain;
+  cb.getUptimeMs = wbGetUptimeMs;
+  webUi.attach(cb);
+  webUi.begin(WEB_AP_SSID, WEB_AP_PASS);
+}
 #endif
 
 void printStatus() {
@@ -61,6 +208,19 @@ void printStatus() {
   Serial.printf("[status] mode=%s fps=%.1f vu=%.2f gain=%.1f auto=%.1f\n",
                 vfxModeName(display.mode()), fps, spectrum.frame().vuLevel, audioMic.gain(),
                 bandLinear.autoGain());
+  const uint32_t frames = frameCount > 0 ? frameCount : 1;
+  Serial.printf("[prof] read=%lu fft=%lu band=%lu render=%lu us\n", profReadUs / frames,
+                profFftUs / frames, profBandUs / frames, profRenderUs / frames);
+  if (profFrames > 0) {
+    Serial.printf("[prof] read=%lu fft=%lu band=%lu render=%lu us/frame\n",
+                  profReadUs / profFrames, profFftUs / profFrames, profBandUs / profFrames,
+                  profRenderUs / profFrames);
+    profReadUs = 0;
+    profFftUs = 0;
+    profBandUs = 0;
+    profRenderUs = 0;
+    profFrames = 0;
+  }
 
 #if defined(BOARD_CARDPUTER_ADV)
   const SpectrumFrame &frame = spectrum.frame();
@@ -77,6 +237,8 @@ void printStatus() {
     Serial.printf(" %.2f", smoothBars[i]);
   }
   Serial.println();
+#else
+  webUi.printStatus();
 #endif
 }
 
@@ -163,22 +325,160 @@ void handleInput() {
 }
 #endif
 
+static void printSerialHelp() {
+  Serial.println(F("=== MusicGoGoGo serial commands ==="));
+  Serial.println(F("n / next          next effect"));
+  Serial.println(F("p / prev          previous effect"));
+  Serial.println(F("m / mode [n]      show effect, or jump: 0=Bars 1=Log 2=Mirror 3=VU 4=Waterfall 5=Rainbow 6=LinePeaks"));
+  Serial.println(F("g / gain [val]    show mic gain, or set: g 3.0 / g+ / g-"));
+  Serial.println(F("+ / -             gain step (+/-0.25)"));
+#if !defined(BOARD_CARDPUTER_ADV)
+  Serial.println(F("pot [on|off]      gain pot control (set gain via serial disables it)"));
+#endif
+  Serial.println(F("a / auto [on|off] toggle auto-cycle"));
+  Serial.println(F("s / status        print status"));
+  Serial.println(F("d / debug         toggle debug overlay (Cardputer)"));
+  Serial.println(F("h / help / ?      this help"));
+  Serial.println(F("=================================="));
+}
+
+static void parseSerialCommand(char *line) {
+  char *cmd = strtok(line, " \t");
+  if (cmd == nullptr) {
+    return;
+  }
+  char *arg = strtok(nullptr, " \t");
+
+  if (strcmp(cmd, "help") == 0 || cmd[0] == 'h' || cmd[0] == '?') {
+    printSerialHelp();
+    return;
+  }
+  if (strcmp(cmd, "next") == 0 || cmd[0] == 'n') {
+    display.nextMode();
+    lastModeCycleMs = millis();
+    Serial.printf("[cmd] mode -> %s\n", vfxModeName(display.mode()));
+    return;
+  }
+  if (strcmp(cmd, "prev") == 0 || cmd[0] == 'p') {
+    display.prevMode();
+    lastModeCycleMs = millis();
+    Serial.printf("[cmd] mode -> %s\n", vfxModeName(display.mode()));
+    return;
+  }
+  if (strcmp(cmd, "mode") == 0 || strcmp(cmd, "m") == 0) {
+    if (arg == nullptr) {
+      Serial.printf("[cmd] mode = %s (%u)\n", vfxModeName(display.mode()),
+                    static_cast<unsigned>(display.mode()));
+    } else if (strcmp(arg, "next") == 0) {
+      display.nextMode();
+    } else if (strcmp(arg, "prev") == 0) {
+      display.prevMode();
+    } else {
+      const int m = atoi(arg);
+      if (m >= 0 && m < static_cast<int>(VfxMode::Count)) {
+        display.setMode(static_cast<VfxMode>(m));
+      } else {
+        Serial.printf("[cmd] bad mode '%s' (0..%u)\n", arg,
+                      static_cast<unsigned>(VfxMode::Count) - 1);
+        return;
+      }
+    }
+    lastModeCycleMs = millis();
+    Serial.printf("[cmd] mode -> %s\n", vfxModeName(display.mode()));
+    return;
+  }
+  if (strcmp(cmd, "gain") == 0 || strcmp(cmd, "g") == 0) {
+    if (arg == nullptr) {
+      Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
+    } else {
+      if (strcmp(arg, "+") == 0) {
+        audioMic.setGain(audioMic.gain() + 0.25f);
+      } else if (strcmp(arg, "-") == 0) {
+        audioMic.setGain(audioMic.gain() - 0.25f);
+      } else {
+        audioMic.setGain(atof(arg));
+      }
+#if !defined(BOARD_CARDPUTER_ADV)
+      gainPot.setEnabled(false);
+      Serial.println(F("[cmd] gain pot control disabled (enable with 'pot on')"));
+#endif
+    }
+    Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
+    return;
+  }
+  if (cmd[0] == '+' || cmd[0] == '=') {
+    audioMic.setGain(audioMic.gain() + 0.25f);
+#if !defined(BOARD_CARDPUTER_ADV)
+    gainPot.setEnabled(false);
+#endif
+    Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
+    return;
+  }
+  if (cmd[0] == '-') {
+    audioMic.setGain(audioMic.gain() - 0.25f);
+#if !defined(BOARD_CARDPUTER_ADV)
+    gainPot.setEnabled(false);
+#endif
+    Serial.printf("[cmd] gain = %.2f\n", audioMic.gain());
+    return;
+  }
+#if !defined(BOARD_CARDPUTER_ADV)
+  if (strcmp(cmd, "pot") == 0) {
+    if (arg != nullptr && strcmp(arg, "on") == 0) {
+      gainPot.setEnabled(true);
+      Serial.println(F("[cmd] gain pot control enabled"));
+    } else if (arg != nullptr && strcmp(arg, "off") == 0) {
+      gainPot.setEnabled(false);
+      Serial.println(F("[cmd] gain pot control disabled"));
+    } else {
+      Serial.printf("[cmd] gain pot control %s\n",
+                    gainPot.enabled() ? "enabled" : "disabled");
+    }
+    return;
+  }
+#endif
+  if (strcmp(cmd, "auto") == 0 || cmd[0] == 'a') {
+    if (arg != nullptr && strcmp(arg, "on") == 0) {
+      autoCycleEnabled = true;
+    } else if (arg != nullptr && strcmp(arg, "off") == 0) {
+      autoCycleEnabled = false;
+    } else {
+      autoCycleEnabled = !autoCycleEnabled;
+    }
+    if (autoCycleEnabled) {
+      lastModeCycleMs = millis();
+    }
+    Serial.printf("[cmd] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
+    return;
+  }
+  if (strcmp(cmd, "status") == 0 || cmd[0] == 's') {
+    printStatus();
+    return;
+  }
+  if (strcmp(cmd, "debug") == 0 || cmd[0] == 'd') {
+#if defined(BOARD_CARDPUTER_ADV)
+    display.toggleDebugOverlay();
+#else
+    Serial.println(F("[cmd] debug overlay not available on S3"));
+#endif
+    return;
+  }
+  Serial.printf("[cmd] unknown '%s' — try 'help'\n", cmd);
+}
+
 void handleSerial() {
+  static char line[48];
+  static size_t len = 0;
   while (Serial.available() > 0) {
     const char c = static_cast<char>(Serial.read());
-    if (c == 'n' || c == 'N') {
-      display.nextMode();
-      lastModeCycleMs = millis();
-    } else if (c == 'p' || c == 'P') {
-      display.prevMode();
-      lastModeCycleMs = millis();
-    } else if (c == 'a' || c == 'A') {
-      autoCycleEnabled = !autoCycleEnabled;
-      Serial.printf("[vfx] auto-cycle %s\n", autoCycleEnabled ? "ON" : "OFF");
-    } else if (c == '+' || c == '=') {
-      audioMic.setGain(audioMic.gain() + 0.25f);
-    } else if (c == '-') {
-      audioMic.setGain(audioMic.gain() - 0.25f);
+    if (c == '\n' || c == '\r') {
+      if (len > 0) {
+        line[len] = '\0';
+        parseSerialCommand(line);
+        len = 0;
+      }
+    } else if (c >= 32 && c < 127 && len < sizeof(line) - 1) {
+      line[len++] = c;
     }
   }
 }
@@ -270,9 +570,9 @@ void setup() {
   const SpectrumFrame &bootFrame = spectrum.frame();
   bandLinear.process(bootFrame.linear32, smoothBars);
   memcpy(peakBars, bandLinear.peaks(), sizeof(peakBars));
-  display.render(bootFrame, smoothBars, peakBars, SPECTRUM_BARS, 0.0f, 0.0f,
+  display.render(bootFrame, smoothBars, peakBars, SPECTRUM_BARS, 0.0f, 0.0f
 #if defined(BOARD_CARDPUTER_ADV)
-                 MicDebugInfo{}
+                 , MicDebugInfo{}
 #endif
   );
 #if defined(BOARD_CARDPUTER_ADV)
@@ -286,10 +586,14 @@ void setup() {
   memset(peakLog12, 0, sizeof(peakLog12));
   memset(peakMirror, 0, sizeof(peakMirror));
   display.render(bootFrame, smoothBars, peakBars, SPECTRUM_BARS, 0.0f, 0.0f, MicDebugInfo{});
-  Serial.println(F("[boot] ready — BtnA=mode | BtnA hold=debug | d=debug | ,/.=mode [ ]=gain"));
+  Serial.println(F("[boot] ready — BtnA=mode | BtnA hold=debug | d=debug | ,/.=mode [ ]=gain | serial: 'help'"));
   Serial.flush();
 #else
-  Serial.println(F("[boot] ready — enc:rotate=mode press=auto | pot=gain"));
+  Serial.println(F("[boot] ready — enc:rotate=mode press=auto | pot=gain | webui @ "));
+  setupWebUi();
+  Serial.println(WiFi.softAPIP().toString().c_str());
+  Serial.println(F("[boot] serial: 'help' for commands"));
+  Serial.flush();
 #endif
 }
 
@@ -302,19 +606,20 @@ void loop() {
 #endif
   const uint32_t now = millis();
 
-#if VFX_AUTO_CYCLE_MS > 0
-  if (autoCycleEnabled && now - lastModeCycleMs >= VFX_AUTO_CYCLE_MS) {
+  if (autoCycleEnabled && g_cycleMs > 0 && now - lastModeCycleMs >= g_cycleMs) {
     display.nextMode();
     lastModeCycleMs = now;
   }
-#endif
 
+  uint32_t t0 = micros();
   if (!audioMic.readSamples(sampleBuffer, FFT_SIZE)) {
     memset(sampleBuffer, 0, sizeof(sampleBuffer));
   }
+  uint32_t t1 = micros();
 
   spectrum.analyze(sampleBuffer, FFT_SIZE);
   const SpectrumFrame &frame = spectrum.frame();
+  uint32_t t2 = micros();
 
   bandLinear.process(frame.linear32, smoothBars);
   bandLog.process(frame.log12, smoothLog12);
@@ -322,6 +627,7 @@ void loop() {
   memcpy(peakBars, bandLinear.peaks(), sizeof(peakBars));
   memcpy(peakLog12, bandLog.peaks(), sizeof(peakLog12));
   memcpy(peakMirror, bandMirror.peaks(), sizeof(peakMirror));
+  uint32_t t3 = micros();
 
   const float *levels = smoothBars;
   const float *peaks = peakBars;
@@ -374,6 +680,13 @@ void loop() {
   display.render(frame, levels, peaks, count, audioMic.lastRms(), audioMic.lastPeak());
 #endif
 
+  const uint32_t t4 = micros();
+  profReadUs += t1 - t0;
+  profFftUs += t2 - t1;
+  profBandUs += t3 - t2;
+  profRenderUs += t4 - t3;
+  ++profFrames;
+
   ++frameCount;
 
   if (now - lastStatusMs >= STATUS_LOG_MS) {
@@ -382,8 +695,8 @@ void loop() {
   }
 
   const uint32_t elapsed = now - lastFrameMs;
-  if (elapsed < SPECTRUM_FRAME_MS) {
-    delay(SPECTRUM_FRAME_MS - elapsed);
+  if (elapsed < g_frameMs) {
+    delay(g_frameMs - elapsed);
   }
   lastFrameMs = millis();
 }

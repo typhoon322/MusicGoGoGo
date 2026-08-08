@@ -113,7 +113,13 @@ void VfxRenderer::resetBarCache() {
   for (size_t i = 0; i < 64; ++i) {
     prevBarH_[i] = -1;
     prevPeakH_[i] = -1;
+    if (i < 32) {
+      prevVuSegLit_[i] = false;
+    }
   }
+  prevLineValid_ = false;
+  vuInit_ = false;
+  areaInit_ = false;
 }
 
 void VfxRenderer::clearPlotArea() {
@@ -143,7 +149,10 @@ uint16_t VfxRenderer::heatColor_(float level) const {
 }
 
 uint16_t VfxRenderer::rainbowColor_(float level, float hue) const {
-  const float h = fmodf(hue + level * 0.25f, 1.0f);
+  float h = fmodf(hue, 1.0f);
+  if (h < 0.0f) {
+    h += 1.0f;
+  }
   const float s = 0.85f;
   const float v = 0.25f + level * 0.75f;
   const int i = static_cast<int>(h * 6.0f);
@@ -341,32 +350,7 @@ void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const floa
     }
   }
 #else
-  bool fullRedraw = false;
-  for (size_t i = 0; i < count; ++i) {
-    if (prevBarH_[i] < 0) {
-      fullRedraw = true;
-      break;
-    }
-    const float level = levels[i] > 1.0f ? 1.0f : levels[i];
-    const float peak = peaks[i] > 1.0f ? 1.0f : peaks[i];
-    int barH = static_cast<int>(level * static_cast<float>(areaH));
-    int peakH = static_cast<int>(peak * static_cast<float>(areaH));
-    if (barH > areaH) {
-      barH = areaH;
-    }
-    if (peakH > areaH) {
-      peakH = areaH;
-    }
-    if (abs(barH - prevBarH_[i]) > 1 || abs(peakH - prevPeakH_[i]) > 1) {
-      fullRedraw = true;
-      break;
-    }
-  }
-
-  if (fullRedraw) {
-    GFX->fillRect(kMarginL, top, areaW, areaH, kBg);
-    GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
-  }
+  GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
 
   for (size_t i = 0; i < count; ++i) {
     const int x = barX(layout, i);
@@ -382,24 +366,34 @@ void VfxRenderer::drawBars_(int top, int bottom, const float *levels, const floa
       peakH = areaH;
     }
 
-    if (!fullRedraw && barH == prevBarH_[i] && peakH == prevPeakH_[i]) {
-      continue;
+    const bool first = prevBarH_[i] < 0;
+    const uint16_t color =
+        gradient ? rainbowColor_(level, hueShift + static_cast<float>(i) * 0.04f)
+                 : gradientBarColor_(level);
+
+    if (first) {
+      GFX->fillRect(x, top, bw, areaH, kBg);
+      if (barH > 0) {
+        GFX->fillRect(x, bottom - barH, bw, barH, color);
+      }
+    } else if (barH > prevBarH_[i]) {
+      GFX->fillRect(x, bottom - barH, bw, barH - prevBarH_[i], color);
+    } else if (barH < prevBarH_[i]) {
+      GFX->fillRect(x, bottom - prevBarH_[i], bw, prevBarH_[i] - barH, kBg);
     }
 
-    GFX->fillRect(x, top, bw, areaH, kBg);
-
-    if (barH > 0) {
-      const int y = bottom - barH;
-      const uint16_t color =
-          gradient ? rainbowColor_(level, hueShift + static_cast<float>(i) * 0.04f)
-                   : gradientBarColor_(level);
-      GFX->fillRect(x, y, bw, barH, color);
+    const bool showNew = peakH > barH + 1;
+    // Erase the old peak only when it still sits above the current bar.
+    // If the bar grew over it, the new fill already repainted that area.
+    const bool showOld = prevPeakH_[i] > barH + 1;
+    if (showOld) {
+      GFX->fillRect(x, bottom - prevPeakH_[i], bw, 2, kBg);
+    }
+    if (showNew) {
+      GFX->fillRect(x, bottom - peakH, bw, 2, TFT_COL_WHITE);
     }
 
-    if (peakH > barH + 1) {
-      const int py = bottom - peakH;
-      GFX->fillRect(x, py, bw, 2, TFT_COL_WHITE);
-    }
+    GFX->drawRect(x, top, bw, areaH, kGrid);
 
     prevBarH_[i] = barH;
     prevPeakH_[i] = peakH;
@@ -418,7 +412,6 @@ void VfxRenderer::drawMirror_(int top, int bottom, const float *levels, const fl
   const SpectrumLayout layout = makeLayout(count, 1);
   const int areaW = layout.areaW;
 
-  GFX->fillRect(kMarginL, top, areaW, bottom - top, kBg);
   GFX->drawFastHLine(kMarginL, midY, areaW, kAccent);
 
   for (size_t i = 0; i < count; ++i) {
@@ -436,15 +429,42 @@ void VfxRenderer::drawMirror_(int top, int bottom, const float *levels, const fl
     }
 
     const uint16_t color = rainbowColor_(level, static_cast<float>(i) * 0.03f);
-    GFX->drawRect(x, top, bw, bottom - top, kGrid);
-    if (barH > 0) {
-      GFX->fillRect(x, midY - barH, bw, barH, color);
-      GFX->fillRect(x, midY + 1, bw, barH, color);
+    const int prevH = prevBarH_[i];
+    const int prevPH = prevPeakH_[i];
+
+    const bool showNew = peakH > barH + 1;
+    const bool showOld = prevH >= 0 && prevPH > barH + 1;
+
+    // Erase old peak lines first so bar growth can repaint over them if needed.
+    if (showOld) {
+      GFX->fillRect(x, midY - prevPH, bw, 1, kBg);
+      GFX->fillRect(x, midY + prevPH, bw, 1, kBg);
     }
-    if (peakH > barH + 1) {
+
+    if (prevH < 0) {
+      GFX->fillRect(x, top, bw, bottom - top, kBg);
+      if (barH > 0) {
+        GFX->fillRect(x, midY - barH, bw, barH, color);
+        GFX->fillRect(x, midY + 1, bw, barH, color);
+      }
+    } else if (barH > prevH) {
+      GFX->fillRect(x, midY - barH, bw, barH - prevH, color);
+      GFX->fillRect(x, midY + 1 + prevH, bw, barH - prevH, color);
+    } else if (barH < prevH) {
+      GFX->fillRect(x, midY - prevH, bw, prevH - barH, kBg);
+      GFX->fillRect(x, midY + 1 + barH, bw, prevH - barH, kBg);
+    }
+
+    if (showNew) {
       GFX->fillRect(x, midY - peakH, bw, 1, TFT_COL_WHITE);
       GFX->fillRect(x, midY + peakH, bw, 1, TFT_COL_WHITE);
     }
+
+    // Bars repaint over the border columns, so restore the frame every frame.
+    GFX->drawRect(x, top, bw, bottom - top, kGrid);
+
+    prevBarH_[i] = barH;
+    prevPeakH_[i] = peakH;
   }
 }
 
@@ -461,14 +481,22 @@ void VfxRenderer::drawVu_(int top, int bottom, const VfxDrawContext &ctx, const 
   const int segCount = 24;
   const SpectrumLayout segLayout = makeLayout(static_cast<size_t>(segCount), segGap);
 
-  GFX->fillRect(kMarginL, top, areaW, bottom - top, kBg);
+  if (!vuInit_) {
+    GFX->fillRect(kMarginL, vuY, areaW, vuH, 0x0400);
+    vuInit_ = true;
+  }
 
   for (int i = 0; i < segCount; ++i) {
     const int x = barX(segLayout, static_cast<size_t>(i));
     const int segW = barWidth(segLayout, static_cast<size_t>(i));
     const float threshold = static_cast<float>(i + 1) / static_cast<float>(segCount);
+    const bool lit = threshold <= ctx.vu;
+    if (lit == prevVuSegLit_[static_cast<size_t>(i)]) {
+      continue;
+    }
+
     uint16_t color = 0x0400;
-    if (threshold <= ctx.vu) {
+    if (lit) {
       if (i < segCount * 6 / 10) {
         color = TFT_COL_GREEN;
       } else if (i < segCount * 85 / 100) {
@@ -478,6 +506,7 @@ void VfxRenderer::drawVu_(int top, int bottom, const VfxDrawContext &ctx, const 
       }
     }
     GFX->fillRect(x, vuY, segW, vuH, color);
+    prevVuSegLit_[static_cast<size_t>(i)] = lit;
   }
 
   drawBars_(vuY + vuH + 10, bottom, levels, levels, count > 16 ? 16 : count, true, 0.0f);
@@ -568,23 +597,37 @@ void VfxRenderer::drawLinePeaks_(int top, int bottom, const float *levels, size_
 
   const int areaW = TFT_WIDTH - kMarginL - kMarginR;
   const int areaH = bottom - top;
-  GFX->fillRect(kMarginL, top, areaW, areaH, kBg);
+
   GFX->drawFastHLine(kMarginL, bottom, areaW, kGrid);
 
-  int prevX = -1;
-  int prevY = -1;
+  int xArr[64];
+  int yArr[64];
+  uint16_t colArr[64];
   for (size_t i = 0; i < count; ++i) {
     const float level = levels[i] > 1.0f ? 1.0f : levels[i];
-    const int x = kMarginL + static_cast<int>(i * areaW / (count - 1));
-    const int y = bottom - static_cast<int>(level * static_cast<float>(areaH));
-    const uint16_t color = rainbowColor_(level, static_cast<float>(i) * 0.02f);
-    GFX->fillCircle(x, y, 2, color);
-    if (prevX >= 0) {
-      GFX->drawLine(prevX, prevY, x, y, color);
-    }
-    prevX = x;
-    prevY = y;
+    xArr[i] = kMarginL + static_cast<int>(i * areaW / (count - 1));
+    yArr[i] = bottom - static_cast<int>(level * static_cast<float>(areaH));
+    colArr[i] = rainbowColor_(level, static_cast<float>(i) * 0.02f);
   }
+
+  if (prevLineValid_) {
+    for (size_t i = 0; i < count; ++i) {
+      GFX->fillCircle(prevLineX_[i], prevLineY_[i], 2, kBg);
+    }
+    for (size_t i = 1; i < count; ++i) {
+      GFX->drawLine(prevLineX_[i - 1], prevLineY_[i - 1], prevLineX_[i], prevLineY_[i], kBg);
+    }
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    prevLineX_[i] = xArr[i];
+    prevLineY_[i] = yArr[i];
+    GFX->fillCircle(xArr[i], yArr[i], 2, colArr[i]);
+  }
+  for (size_t i = 1; i < count; ++i) {
+    GFX->drawLine(xArr[i - 1], yArr[i - 1], xArr[i], yArr[i], colArr[i]);
+  }
+  prevLineValid_ = true;
 }
 
 void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *levels,
@@ -599,6 +642,7 @@ void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *lev
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
   if (plotSprite_ != nullptr && plotSprite_->width() > 0) {
     plotSprite_->fillScreen(kBg);
+    resetBarCache();
     gfxOverride_ = plotSprite_;
     drawPlotMode_(ctx, mode, levels, peaks, count, waterfallHistory, waterfallHead);
     if (ctx.showMicDebug) {
@@ -612,6 +656,24 @@ void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *lev
   }
 #endif
 
+  // On the first frame after entering a mode, clear the whole plot area so
+  // column gaps (which incremental rendering never repaints) are not left
+  // holding stale pixels (e.g. splash text).
+  if (!areaInit_) {
+    tft_->fillRect(0, kAreaTop, TFT_WIDTH, kAreaBottom - kAreaTop, kBg);
+    areaInit_ = true;
+  }
+
+  // drawRGBBitmap() issues its own startWrite/endWrite, so keep the
+  // waterfall on a separate (unwrapped) path to avoid nested transactions.
+  if (mode == VfxMode::Waterfall) {
+    drawWaterfall_(kAreaTop, kAreaBottom, levels, waterfallHistory, waterfallHead);
+    return;
+  }
+
+  // Adafruit primitives (fillRect/drawFastHLine/...) manage their own SPI
+  // transactions, so do NOT wrap them in an outer startWrite/endWrite —
+  // nesting would re-lock the non-recursive SPI mutex and deadlock.
   switch (mode) {
     case VfxMode::Bars32:
       drawBars_(kAreaTop, kAreaBottom, levels, peaks, count, false, 0.0f);
@@ -625,11 +687,8 @@ void VfxRenderer::draw(const VfxDrawContext &ctx, VfxMode mode, const float *lev
     case VfxMode::VuMeter:
       drawVu_(kAreaTop, kAreaBottom, ctx, levels, count);
       break;
-    case VfxMode::Waterfall:
-      drawWaterfall_(kAreaTop, kAreaBottom, levels, waterfallHistory, waterfallHead);
-      break;
     case VfxMode::Rainbow: {
-      const float hue = fmodf(static_cast<float>(ctx.frameMs) * 0.00008f, 1.0f);
+      const float hue = fmodf(static_cast<float>(ctx.frameMs) * 0.00002f, 1.0f);
       drawBars_(kAreaTop, kAreaBottom, levels, peaks, count, true, hue);
       break;
     }

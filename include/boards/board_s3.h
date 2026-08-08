@@ -47,3 +47,10 @@
 // FFT / spectrum display defaults
 #define FFT_SIZE 512
 #define SPECTRUM_BARS 32
+
+// Auto-cycle disabled by default on S3; enable anytime via Web UI / serial 'a'
+#define VFX_AUTO_CYCLE_MS 0
+
+// No usable PSRAM on this dev board — keep the waterfall ring buffer small so
+// WiFi/AsyncTCP have enough heap during boot.
+#define VFX_WATERFALL_HISTORY 80

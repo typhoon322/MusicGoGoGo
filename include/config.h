@@ -36,3 +36,11 @@
 #ifndef VFX_WATERFALL_HISTORY
 #define VFX_WATERFALL_HISTORY 200
 #endif
+
+// Web UI / WiFi AP (S3 only)
+#ifndef WEB_AP_SSID
+#define WEB_AP_SSID "MusicGoGoGo"
+#endif
+#ifndef WEB_AP_PASS
+#define WEB_AP_PASS "musicgogo"
+#endif

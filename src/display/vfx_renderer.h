@@ -78,4 +78,10 @@ class VfxRenderer {
   float lastHeaderPeak_ = -1.0f;
   int prevBarH_[64] = {};
   int prevPeakH_[64] = {};
+  bool prevVuSegLit_[32] = {};
+  int prevLineX_[64] = {};
+  int prevLineY_[64] = {};
+  bool prevLineValid_ = false;
+  bool vuInit_ = false;
+  bool areaInit_ = false;
 };
