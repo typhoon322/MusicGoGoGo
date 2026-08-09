@@ -6,9 +6,17 @@
 struct BeatState {
   float bpm = 0.0f;
   float confidence = 0.0f;
-  // Continuous band levels 0..1 for UI/LED (not onset pulses).
-  float kickPulse = 0.0f;   // low / bass energy
-  float snarePulse = 0.0f;  // high energy
+  float beatPulse = 0.0f;
+  float bassLevel = 0.0f;
+  float highLevel = 0.0f;
+  float dbgLow = 0.0f;
+  float dbgLowFlux = 0.0f;
+  float dbgSpecFlux = 0.0f;
+  float dbgThr = 0.0f;
+  float dbgScore = 0.0f;
+  float dbgAvg = 0.0f;
+  bool dbgFired = false;
+  uint32_t dbgBeatCount = 0;
 };
 
 class BeatTracker {
@@ -19,17 +27,20 @@ class BeatTracker {
 
  private:
   float sumBands_(const float *levels, size_t count, size_t i0, size_t i1) const;
-  static float clamp01_(float v);
-  void maybeUpdateBpm_(float bass, float prevBass, uint32_t nowMs);
+  void onBeat_(uint32_t nowMs, float flux);
+  uint32_t medianInterval_() const;
+  uint32_t cooldownMs_() const;
 
   BeatState state_;
-  float bassEma_ = 0.0f;
-  float highEma_ = 0.0f;
-  float prevBass_ = 0.0f;
-  uint32_t lastBpmOnsetMs_ = 0;
-  uint32_t lastGoodConfMs_ = 0;
+  float env_ = 0.0f;
+  float prevEnv_ = 0.0f;
+  float avgEnergy_ = 0.0f;
+  float avgFlux_ = 0.0f;
+  uint32_t startMs_ = 0;
+  uint32_t lastBeatMs_ = 0;
+  bool armed_ = true;
 
-  static constexpr size_t kIoiCap = 12;
+  static constexpr size_t kIoiCap = 20;
   uint32_t ioiMs_[kIoiCap] = {};
   size_t ioiCount_ = 0;
   size_t ioiHead_ = 0;

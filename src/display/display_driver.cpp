@@ -237,8 +237,7 @@ void DisplayDriver::render(const SpectrumFrame &spec, const float *levels, const
   ctx.mode = mode_;
   ctx.beatBpm = beat.bpm;
   ctx.beatConfidence = beat.confidence;
-  ctx.kickPulse = beat.kickPulse;
-  ctx.snarePulse = beat.snarePulse;
+  ctx.beatPulse = beat.beatPulse;
 #if defined(BOARD_CARDPUTER_ADV)
   ctx.showMicDebug = debugOverlay_;
   ctx.batteryPercent = micDebug.batteryPercent;

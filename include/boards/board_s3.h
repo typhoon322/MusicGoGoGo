@@ -67,5 +67,5 @@
 #define VFX_WATERFALL_HISTORY 240
 
 // Taller header strip for the walking/jumping cat
-#define VFX_HEADER_H 36
-#define VFX_AREA_TOP 38
+#define VFX_HEADER_H 52
+#define VFX_AREA_TOP 52

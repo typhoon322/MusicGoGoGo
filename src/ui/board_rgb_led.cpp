@@ -8,8 +8,6 @@
 #include "config.h"
 
 namespace {
-// DevKitC-1: v1.1 → GPIO38, v1.0 → GPIO48. Drive both with separate drivers
-// (Arduino neopixelWrite() only binds RMT to the first pin forever).
 Adafruit_NeoPixel px38(1, 38, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel px48(1, 48, NEO_GRB + NEO_KHZ800);
 uint8_t lastR_ = 255;
@@ -22,6 +20,16 @@ void writeBoth_(uint8_t r, uint8_t g, uint8_t b) {
   px48.setPixelColor(0, c);
   px38.show();
   px48.show();
+}
+
+float clamp01_(float v) {
+  if (v < 0.0f) {
+    return 0.0f;
+  }
+  if (v > 1.0f) {
+    return 1.0f;
+  }
+  return v;
 }
 }  // namespace
 
@@ -38,34 +46,18 @@ void boardRgbBegin() {
   delay(200);
   writeBoth_(0, 0, 0);
   lastR_ = lastG_ = lastB_ = 0;
-  Serial.println(F("[rgb] NeoPixel drivers on GPIO38+48 (kick=blue snare=green)"));
+  Serial.println(F("[rgb] NeoPixel GPIO38+48 (flash on beat only)"));
 }
 
-void boardRgbUpdate(float kickPulse, float snarePulse) {
-  if (kickPulse < 0.0f) {
-    kickPulse = 0.0f;
-  }
-  if (kickPulse > 1.0f) {
-    kickPulse = 1.0f;
-  }
-  if (snarePulse < 0.0f) {
-    snarePulse = 0.0f;
-  }
-  if (snarePulse > 1.0f) {
-    snarePulse = 1.0f;
-  }
-
+void boardRgbUpdate(float beatPulse, float /*bassLevel*/, float /*highLevel*/) {
+  beatPulse = clamp01_(beatPulse);
+  // Beat-only flash — continuous wash looked like chaotic blinking.
   uint8_t r = 0;
   uint8_t g = 0;
   uint8_t b = 0;
-  if (kickPulse > 0.12f) {
-    b = static_cast<uint8_t>(70.0f + kickPulse * 185.0f);
-  }
-  if (snarePulse > 0.12f) {
-    g = static_cast<uint8_t>(60.0f + snarePulse * 195.0f);
-  }
-  if (kickPulse > 0.55f && snarePulse > 0.55f) {
-    r = 70;
+  if (beatPulse > 0.15f) {
+    const uint8_t flash = static_cast<uint8_t>(40.0f + beatPulse * 215.0f);
+    r = g = b = flash;
   }
 
   if (r == lastR_ && g == lastG_ && b == lastB_) {

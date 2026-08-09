@@ -952,7 +952,24 @@ void loop() {
   const SpectrumFrame &frame = spectrum.frame();
   beatTracker.process(frame.linear32, SPECTRUM_BARS, frameStartMs);
   const BeatState &beat = beatTracker.state();
-  boardRgbUpdate(beat.kickPulse, beat.snarePulse);
+  boardRgbUpdate(beat.beatPulse, beat.bassLevel, beat.highLevel);
+  {
+    static uint32_t lastBeatLogMs = 0;
+    static uint32_t lastBeatCount = 0;
+    if (beat.dbgFired) {
+      Serial.printf("[beat] FIRE low=%.3f flux=%.3f spec=%.3f score=%.3f thr=%.3f avg=%.3f bpm=%.1f conf=%.2f\n",
+                    beat.dbgLow, beat.dbgLowFlux, beat.dbgSpecFlux, beat.dbgScore, beat.dbgThr,
+                    beat.dbgAvg, beat.bpm, beat.confidence);
+    }
+    if (frameStartMs - lastBeatLogMs >= 500) {
+      const uint32_t dBeats = beat.dbgBeatCount - lastBeatCount;
+      lastBeatCount = beat.dbgBeatCount;
+      lastBeatLogMs = frameStartMs;
+      Serial.printf("[beat] hz=%.1f low=%.3f flux=%.3f spec=%.3f score=%.3f thr=%.3f pulse=%.2f bpm=%.1f\n",
+                    static_cast<float>(dBeats) * 2.0f, beat.dbgLow, beat.dbgLowFlux, beat.dbgSpecFlux,
+                    beat.dbgScore, beat.dbgThr, beat.beatPulse, beat.bpm);
+    }
+  }
   uint32_t t2 = micros();
 
   bandLinear.process(frame.linear32, smoothBars);

@@ -38,7 +38,7 @@ constexpr uint16_t kCatOrange = 0xFBE0;  // warm orange
 constexpr uint16_t kCatCream = 0xEF5D;
 constexpr uint16_t kCatDark = 0x8410;
 constexpr uint16_t kCatPink = 0xFCF0;
-constexpr int kCatSpriteW = 26;
+constexpr int kCatSpriteW = 34;
 // BPM digits + two hit dots to the right (kick blue / snare green)
 constexpr int kBpmZoneW = 78;
 constexpr int kCatSpriteH = 22;
@@ -177,8 +177,12 @@ void VfxRenderer::resetHeaderCache() {
   lastBpmDrawn_ = -2;
   heldBpmDisplay_ = -1;
   lastBpmLockDrawn_ = false;
-  lastKickDotLevel_ = -1;
-  lastSnareDotLevel_ = -1;
+  lastBeatDotLevel_ = -1;
+  lastCatWalkFrame_ = -1;
+  lastCatDirDrawn_ = 0;
+  catStepAccum_ = 0.0f;
+  catWalkBpmSmooth_ = 0.0f;
+  lastCatMotionMs_ = 0;
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
   lastHeaderDrawMs_ = 0;
   lastBatteryPercent_ = -1;
@@ -358,43 +362,70 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
   constexpr float kMusicOn = 0.035f;
   const bool dancing = vu >= kMusicOn;
   constexpr float kConfUse = 0.32f;
-  const bool beatLock = dancing && ctx.beatConfidence >= kConfUse && ctx.beatBpm >= 70.0f;
+  // Walk follows tempo whenever we have a BPM (confidence only gates hop sync).
+  // Previously beatLock required conf≥0.32, so speed tweaks never applied.
+  float bpmWalk = ctx.beatBpm;
+  if (bpmWalk < 60.0f && heldBpmDisplay_ >= 60) {
+    bpmWalk = static_cast<float>(heldBpmDisplay_);
+  }
+  const bool hasTempo = bpmWalk >= 60.0f;
+  const bool beatLock = dancing && ctx.beatConfidence >= kConfUse && hasTempo;
 
-  // Motion: beat-locked walk/hops when locked; VU fake hop when dancing;
-  // slow stroll when quiet.
+  // Smooth slide + fast cartoon leg cycle (Tom&Jerry-style scramble).
   float targetHop = 0.0f;
-  int walkFrame = 0;
-  if (beatLock) {
-    const float bpm = ctx.beatBpm;
-    const float beatPeriodMs = 60000.0f / bpm;
-    walkFrame = static_cast<int>(fmodf(static_cast<float>(ctx.frameMs), beatPeriodMs) /
-                                 (beatPeriodMs * 0.5f)) &
-                1;
-    // Walk speed: 70→~1.2px/frame, 160→~2.8px/frame (~30FPS coarse tune)
-    const float t = (bpm - 70.0f) / 90.0f;
-    const float speed = 1.2f + t * 1.6f;
-    catX_ += static_cast<float>(catDir_) * speed;
+  int walkFrame = lastCatWalkFrame_ >= 0 ? lastCatWalkFrame_ : 0;
 
-    if (ctx.kickPulse > 0.15f) {
-      targetHop = 10.0f + ctx.kickPulse * 16.0f;
-    } else if (ctx.snarePulse > 0.15f) {
-      targetHop = 3.0f + ctx.snarePulse * 6.0f;
+  uint32_t dtMs = 33;
+  if (lastCatMotionMs_ != 0 && ctx.frameMs >= lastCatMotionMs_) {
+    dtMs = ctx.frameMs - lastCatMotionMs_;
+  }
+  if (dtMs < 1) {
+    dtMs = 1;
+  }
+  if (dtMs > 80) {
+    dtMs = 33;
+  }
+  lastCatMotionMs_ = ctx.frameMs;
+  const float dt = static_cast<float>(dtMs) * 0.001f;
+
+  float slidePxPerSec = 18.0f;  // quiet default
+  float legHz = 8.0f;           // foot swaps per second (cartoon scramble)
+  if (hasTempo) {
+    if (catWalkBpmSmooth_ < 60.0f) {
+      catWalkBpmSmooth_ = bpmWalk;
+    } else {
+      catWalkBpmSmooth_ += (bpmWalk - catWalkBpmSmooth_) * 0.08f;
+    }
+    // Gentle slide ∝ BPM; legs run much faster than travel.
+    slidePxPerSec = 12.0f + (catWalkBpmSmooth_ - 60.0f) * (18.0f / 100.0f);  // ~12..30
+    legHz = 7.0f + (catWalkBpmSmooth_ - 60.0f) * (5.0f / 100.0f);            // ~7..12 Hz
+    if (beatLock && ctx.beatPulse > 0.20f) {
+      targetHop = 28.0f;
+      legHz += 4.0f;  // scramble harder on kick
     }
   } else if (dancing) {
-    // Original VU fake-beat path
-    const int wf = static_cast<int>((ctx.frameMs / 110) % 2);
-    walkFrame = wf;
-    const float tempo = 0.018f + vu * 0.045f;
-    const float beat = sinf(static_cast<float>(ctx.frameMs) * tempo);
-    targetHop = (beat > 0.0f ? beat : 0.0f) * (10.0f + vu * 16.0f);
-    catX_ += static_cast<float>(catDir_) * (0.4f + vu * 1.2f);
+    catWalkBpmSmooth_ = 0.0f;
+    slidePxPerSec = 14.0f + vu * 10.0f;
+    legHz = 9.0f + vu * 3.0f;
   } else {
-    walkFrame = static_cast<int>((ctx.frameMs / 110) % 2);
-    targetHop = walkFrame ? 1.5f : 0.0f;
-    catX_ += static_cast<float>(catDir_) * 2.2f;
+    catWalkBpmSmooth_ = 0.0f;
+    slidePxPerSec = 10.0f;
+    legHz = 6.0f;
   }
-  catHopSmoothed_ += (targetHop - catHopSmoothed_) * 0.45f;
 
+  catX_ += static_cast<float>(catDir_) * slidePxPerSec * dt;
+
+  // Leg phase — at most one pose flip per frame (cartoon scramble ~7–12 Hz).
+  catStepAccum_ += legHz * dt;
+  if (catStepAccum_ >= 1.0f) {
+    catStepAccum_ -= 1.0f;
+    if (catStepAccum_ > 0.5f) {
+      catStepAccum_ = 0.0f;
+    }
+    walkFrame ^= 1;
+  }
+
+  catHopSmoothed_ = targetHop;
   const float minX = static_cast<float>(kBpmZoneW + kCatSpriteW / 2 + 2);
   const float maxX = static_cast<float>(TFT_WIDTH - kCatSpriteW / 2 - 2);
   if (catX_ < minX) {
@@ -407,18 +438,56 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
 
   const int cx = static_cast<int>(catX_ + 0.5f);
   const int ground = kHeaderH - 2;
-  const int hop = static_cast<int>(catHopSmoothed_ + 0.5f);
-  const int cy = ground - hop;  // feet y
+  // Keep ears/tail inside the header.
+  const int maxHop = ground - 28;
+  int hop = static_cast<int>(catHopSmoothed_ + 0.5f);
+  if (hop > maxHop) {
+    hop = maxHop;
+  }
+  if (hop < 0) {
+    hop = 0;
+  }
+  const int cy = ground - hop;
 
-  // Erase previous + current span so fast walks don't leave crumbs.
-  // Keep left BPM badge zone intact.
+  int bpmShow = -1;
+  if (ctx.beatBpm >= 60.0f && ctx.beatConfidence >= 0.28f) {
+    heldBpmDisplay_ = static_cast<int>(ctx.beatBpm + 0.5f);
+    if (heldBpmDisplay_ < 60) {
+      heldBpmDisplay_ = 60;
+    }
+    if (heldBpmDisplay_ > 160) {
+      heldBpmDisplay_ = 160;
+    }
+    bpmShow = heldBpmDisplay_;
+  } else if (heldBpmDisplay_ >= 60 && ctx.beatBpm >= 60.0f && ctx.beatConfidence >= 0.12f) {
+    bpmShow = heldBpmDisplay_;
+  } else if (ctx.beatConfidence < 0.08f) {
+    heldBpmDisplay_ = -1;
+    bpmShow = -1;
+  } else if (heldBpmDisplay_ >= 60) {
+    bpmShow = heldBpmDisplay_;
+  }
+  // Binary beat flash — avoid per-frame pulse decay redraws (was strobing text).
+  const int beatQ = (ctx.beatPulse > 0.35f) ? 1 : 0;
+
+  const bool catMoved = !catHeaderInit_ || cx != prevCatX_ || cy != prevCatY_ ||
+                        walkFrame != lastCatWalkFrame_ || catDir_ != lastCatDirDrawn_;
+  const bool textDirty = (bpmShow != lastBpmDrawn_) || (lastBpmDrawn_ == -2);
+  const bool beatDirty = (beatQ != lastBeatDotLevel_);
+
+  if (!catMoved && !textDirty && !beatDirty) {
+    return;
+  }
+
+  // Local erase only (never wipe whole header — that strobes badly on ST7789).
   if (!catHeaderInit_) {
-    tft_->fillRect(kBpmZoneW, 0, TFT_WIDTH - kBpmZoneW, kHeaderH, kBg);
+    tft_->fillRect(0, 0, TFT_WIDTH, kHeaderH, kBg);
     catHeaderInit_ = true;
-    lastBpmDrawn_ = -2;
-  } else if (prevCatX_ >= 0) {
-    int left = (prevCatX_ < cx ? prevCatX_ : cx) - kCatSpriteW / 2 - 3;
-    int right = (prevCatX_ > cx ? prevCatX_ : cx) + kCatSpriteW / 2 + 3;
+    lastBpmDrawn_ = -2;  // force badge after first clear
+  } else if (catMoved && prevCatX_ >= 0) {
+    constexpr int kPad = 16;  // covers tail / hop smear
+    int left = (prevCatX_ < cx ? prevCatX_ : cx) - kCatSpriteW / 2 - kPad;
+    int right = (prevCatX_ > cx ? prevCatX_ : cx) + kCatSpriteW / 2 + kPad;
     if (left < kBpmZoneW) {
       left = kBpmZoneW;
     }
@@ -430,163 +499,164 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
     }
   }
 
-  const int f = catDir_;  // +1 face right, -1 face left
-  const int headX = cx + 7 * f;
-  const int hipX = cx - 4 * f;
-  const int bodyL = (f > 0) ? (cx - 9) : (cx - 5);
-
-  // body + haunch
-  tft_->fillRoundRect(bodyL, cy - 13, 14, 10, 3, kCatOrange);
-  tft_->fillCircle(hipX, cy - 8, 6, kCatOrange);
-  // head + muzzle
-  tft_->fillCircle(headX, cy - 14, 7, kCatOrange);
-  tft_->fillCircle(headX + 4 * f, cy - 12, 3, kCatCream);
-  // ears (pink inside)
-  tft_->fillTriangle(headX - 2 * f, cy - 19, headX - 1 * f, cy - 25, headX + 2 * f, cy - 18,
-                     kCatOrange);
-  tft_->fillTriangle(headX + 2 * f, cy - 19, headX + 4 * f, cy - 25, headX + 6 * f, cy - 18,
-                     kCatOrange);
-  tft_->fillTriangle(headX - 1 * f, cy - 19, headX - 1 * f, cy - 23, headX + 1 * f, cy - 19,
-                     kCatPink);
-  tft_->fillTriangle(headX + 3 * f, cy - 19, headX + 4 * f, cy - 23, headX + 5 * f, cy - 19,
-                     kCatPink);
-  // eye + nose
-  tft_->fillCircle(headX + 2 * f, cy - 15, 1, kCatDark);
-  tft_->fillCircle(headX + 5 * f, cy - 12, 1, kCatDark);
-
-  // big wagging tail — snare accent when beat-locked
-  const int tailSwing = beatLock
-                            ? static_cast<int>(ctx.snarePulse * 10.0f +
-                                              sinf(ctx.frameMs * 0.028f) * 3.0f)
-                            : (dancing ? static_cast<int>(sinf(ctx.frameMs * 0.028f) * 6.0f)
-                                       : (walkFrame ? 4 : -3));
-  const int tailX = cx - 12 * f;
-  const int tailY = cy - 18 - tailSwing;
-  tft_->drawLine(hipX - 2 * f, cy - 10, tailX, tailY, kCatOrange);
-  tft_->drawLine(hipX - 2 * f, cy - 9, tailX - f, tailY + 1, kCatOrange);
-  tft_->fillCircle(tailX, tailY, 3, kCatOrange);
-
-  // legs — long stride / tucked jump
-  if (dancing) {
-    const int tuck = hop > 8 ? 1 : 3;
-    tft_->fillRect(cx - 5, cy - tuck, 3, 2 + tuck, kCatOrange);
-    tft_->fillRect(cx - 1, cy - tuck, 3, 2 + tuck, kCatOrange);
-    tft_->fillRect(cx + 3, cy - tuck, 3, 2 + tuck, kCatOrange);
-  } else if (walkFrame == 0) {
-    tft_->fillRect(cx - 8 * f, cy - 4, 3, 6, kCatOrange);
-    tft_->fillRect(cx + 3 * f, cy - 4, 3, 6, kCatOrange);
-    tft_->fillRect(cx - 3 * f, cy - 2, 3, 3, kCatOrange);
-    tft_->fillRect(cx + 6 * f, cy - 2, 3, 3, kCatOrange);
-  } else {
-    tft_->fillRect(cx - 3 * f, cy - 4, 3, 6, kCatOrange);
-    tft_->fillRect(cx + 6 * f, cy - 4, 3, 6, kCatOrange);
-    tft_->fillRect(cx - 8 * f, cy - 2, 3, 3, kCatOrange);
-    tft_->fillRect(cx + 3 * f, cy - 2, 3, 3, kCatOrange);
+  if (textDirty) {
+    lastBpmDrawn_ = bpmShow;
+    lastBpmLockDrawn_ = beatLock;
+    drawBpmBadgeText_(beatLock, bpmShow);
+    lastBeatDotLevel_ = -1;  // refresh dot after text clear
+  } else if (beatLock != lastBpmLockDrawn_) {
+    lastBpmLockDrawn_ = beatLock;
+    const uint16_t rail = beatLock ? kAccent : darken_(kAccent, 0.35f);
+    tft_->fillRect(0, 4, 2, kHeaderH - 8, rail);
+  }
+  if (beatQ != lastBeatDotLevel_) {
+    lastBeatDotLevel_ = beatQ;
+    drawBeatDot_(beatQ != 0);
   }
 
-  const int shadowW = dancing ? 12 : 18;
+  if (!catMoved) {
+    return;
+  }
+  lastCatWalkFrame_ = walkFrame;
+  lastCatDirDrawn_ = catDir_;
+
+  const int f = catDir_;
+  // More feline silhouette: slim body, tall ears, whiskers, question-mark tail.
+  const int headX = cx + 8 * f;
+  const int headY = cy - 16;
+  const int chestX = cx + 1 * f;
+  const int hipX = cx - 6 * f;
+
+  // Slim torso (dogs look chunky; cats are long and low).
+  tft_->fillRoundRect((f > 0) ? (hipX - 1) : (chestX - 2), cy - 12, 12, 7, 2, kCatOrange);
+  tft_->fillCircle(hipX, cy - 9, 4, kCatOrange);     // small haunch
+  tft_->fillCircle(chestX, cy - 10, 4, kCatOrange);  // chest
+
+  // Round head a bit smaller than before
+  tft_->fillCircle(headX, headY, 6, kCatOrange);
+  tft_->fillCircle(headX + 3 * f, headY + 1, 2, kCatCream);  // tiny muzzle
+
+  // Tall pointed ears (the #1 cat cue)
+  tft_->fillTriangle(headX - 3 * f, headY - 4, headX - 5 * f, headY - 14, headX - 1 * f,
+                     headY - 5, kCatOrange);
+  tft_->fillTriangle(headX + 1 * f, headY - 4, headX + 3 * f, headY - 14, headX + 5 * f,
+                     headY - 5, kCatOrange);
+  tft_->fillTriangle(headX - 3 * f, headY - 5, headX - 4 * f, headY - 11, headX - 2 * f,
+                     headY - 5, kCatPink);
+  tft_->fillTriangle(headX + 2 * f, headY - 5, headX + 3 * f, headY - 11, headX + 4 * f,
+                     headY - 5, kCatPink);
+
+  // Eyes + pink nose
+  tft_->fillCircle(headX + 1 * f, headY - 1, 1, kCatDark);
+  tft_->fillCircle(headX + 4 * f, headY - 1, 1, kCatDark);
+  tft_->fillTriangle(headX + 3 * f, headY + 1, headX + 2 * f, headY + 3, headX + 4 * f,
+                     headY + 3, kCatPink);
+
+  // Whiskers (Adafruit HLine needs positive width)
+  if (f > 0) {
+    tft_->drawFastHLine(headX + 4, headY + 2, 5, kCatDark);
+    tft_->drawFastHLine(headX + 4, headY + 4, 6, kCatDark);
+    tft_->drawFastHLine(headX - 7, headY + 2, 4, kCatDark);
+    tft_->drawFastHLine(headX - 8, headY + 4, 5, kCatDark);
+  } else {
+    tft_->drawFastHLine(headX - 9, headY + 2, 5, kCatDark);
+    tft_->drawFastHLine(headX - 10, headY + 4, 6, kCatDark);
+    tft_->drawFastHLine(headX + 3, headY + 2, 4, kCatDark);
+    tft_->drawFastHLine(headX + 3, headY + 4, 5, kCatDark);
+  }
+
+  // Question-mark cat tail (thin, high arc — not a stubby dog tail)
+  const int tailSwing = walkFrame ? 3 : -2;
+  const int t0x = hipX - 2 * f;
+  const int t0y = cy - 10;
+  const int t1x = hipX - 8 * f;
+  int t1y = cy - 20 - tailSwing;
+  const int t2x = hipX - 11 * f;
+  int t2y = cy - 14 - tailSwing;
+  if (t1y < 1) {
+    t1y = 1;
+  }
+  if (t2y < 1) {
+    t2y = 1;
+  }
+  tft_->drawLine(t0x, t0y, t1x, t1y, kCatOrange);
+  tft_->drawLine(t0x, t0y + 1, t1x, t1y + 1, kCatOrange);
+  tft_->drawLine(t1x, t1y, t2x, t2y, kCatOrange);
+  tft_->fillCircle(t2x, t2y, 2, kCatOrange);
+
+  // Thin cat legs (not thick dog stilts)
+  if (hop > 6) {
+    tft_->fillRect(cx - 4, cy - 2, 2, 3, kCatOrange);
+    tft_->fillRect(cx - 1, cy - 1, 2, 2, kCatOrange);
+    tft_->fillRect(cx + 2, cy - 2, 2, 3, kCatOrange);
+  } else if (walkFrame == 0) {
+    tft_->fillRect(cx - 7 * f, cy - 3, 2, 5, kCatOrange);
+    tft_->fillRect(cx + 2 * f, cy - 3, 2, 5, kCatOrange);
+    tft_->fillRect(cx - 3 * f, cy - 1, 2, 2, kCatOrange);
+    tft_->fillRect(cx + 5 * f, cy - 1, 2, 2, kCatOrange);
+  } else {
+    tft_->fillRect(cx - 3 * f, cy - 3, 2, 5, kCatOrange);
+    tft_->fillRect(cx + 5 * f, cy - 3, 2, 5, kCatOrange);
+    tft_->fillRect(cx - 7 * f, cy - 1, 2, 2, kCatOrange);
+    tft_->fillRect(cx + 2 * f, cy - 1, 2, 2, kCatOrange);
+  }
+
+  const int shadowW = hop > 6 ? 10 : 16;
   tft_->drawFastHLine(cx - shadowW / 2, ground, shadowW, kCatDark);
 
   prevCatX_ = cx;
   prevCatY_ = cy;
-
-  drawBpmBadge_(ctx, beatLock);
 }
 
-void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
+void VfxRenderer::drawBpmBadgeText_(bool beatLock, int bpmShow) {
   if (tft_ == nullptr) {
     return;
   }
+  // Clear text zone only (leave cat region alone).
+  tft_->fillRect(0, 0, kBpmZoneW, kHeaderH, kBg);
 
-  int bpmShow = -1;
-  // Hysteresis: keep last integer once we have had a lock recently.
-  if (ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.28f) {
-    heldBpmDisplay_ = static_cast<int>(ctx.beatBpm + 0.5f);
-    if (heldBpmDisplay_ < 70) {
-      heldBpmDisplay_ = 70;
-    }
-    if (heldBpmDisplay_ > 160) {
-      heldBpmDisplay_ = 160;
-    }
-    bpmShow = heldBpmDisplay_;
-  } else if (heldBpmDisplay_ >= 70 && ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.12f) {
-    bpmShow = heldBpmDisplay_;
-  } else if (ctx.beatConfidence < 0.08f) {
-    heldBpmDisplay_ = -1;
-    bpmShow = -1;
-  } else if (heldBpmDisplay_ >= 70) {
-    bpmShow = heldBpmDisplay_;
+  const uint16_t rail = beatLock ? kAccent : darken_(kAccent, 0.35f);
+  tft_->fillRect(0, 4, 2, kHeaderH - 8, rail);
+
+  const uint16_t labelCol = beatLock ? darken_(kAccent, 0.75f) : darken_(kText, 0.45f);
+  const uint16_t numCol =
+      beatLock ? kAccent : (bpmShow > 0 ? darken_(kAccent, 0.55f) : darken_(kText, 0.35f));
+
+  char line[16];
+  if (bpmShow > 0) {
+    snprintf(line, sizeof(line), "BPM:%d", bpmShow);
+  } else {
+    snprintf(line, sizeof(line), "BPM:--");
   }
+  tft_->setTextSize(1);
+  tft_->setTextColor(numCol);
+  tft_->setCursor(6, 4);
+  tft_->print(line);
 
-  // Quantize levels so we redraw when loudness moves.
-  const int kickQ = static_cast<int>(ctx.kickPulse * 20.0f + 0.5f);
-  const int snareQ = static_cast<int>(ctx.snarePulse * 20.0f + 0.5f);
-  const bool textDirty =
-      (bpmShow != lastBpmDrawn_) || (beatLock != lastBpmLockDrawn_) || (lastKickDotLevel_ < 0);
-  const bool dotsDirty = (kickQ != lastKickDotLevel_) || (snareQ != lastSnareDotLevel_);
-  if (!textDirty && !dotsDirty) {
+  tft_->setTextColor(labelCol);
+  tft_->setCursor(6, 14);
+  tft_->print(F("BEAT:"));
+}
+
+void VfxRenderer::drawBeatDot_(bool lit) {
+  if (tft_ == nullptr) {
     return;
   }
-  lastBpmDrawn_ = bpmShow;
-  lastBpmLockDrawn_ = beatLock;
-  lastKickDotLevel_ = kickQ;
-  lastSnareDotLevel_ = snareQ;
-
-  // Left: BPM text. Right: low(blue) / high(green) level dots.
-  constexpr int kTextW = 50;
-  if (textDirty) {
-    tft_->fillRect(0, 0, kTextW, kHeaderH, kBg);
-
-    const uint16_t rail = beatLock ? kAccent : darken_(kAccent, 0.35f);
-    tft_->fillRect(0, 4, 2, kHeaderH - 8, rail);
-
-    const uint16_t labelCol = beatLock ? darken_(kAccent, 0.75f) : darken_(kText, 0.45f);
-    const uint16_t numCol = beatLock ? kAccent : (bpmShow > 0 ? darken_(kAccent, 0.55f)
-                                                             : darken_(kText, 0.35f));
-
-    tft_->setTextSize(1);
-    tft_->setTextColor(labelCol);
-    tft_->setCursor(8, 3);
-    tft_->print(F("BPM"));
-
-    char buf[8];
-    if (bpmShow > 0) {
-      snprintf(buf, sizeof(buf), "%d", bpmShow);
-    } else {
-      snprintf(buf, sizeof(buf), "--");
-    }
-    tft_->setTextSize(2);
-    tft_->setTextColor(numCol);
-    const int digitW = static_cast<int>(strlen(buf)) * 12;
-    int nx = 8;
-    if (digitW + 8 < kTextW) {
-      nx = 6 + (kTextW - 8 - digitW) / 2;
-    }
-    tft_->setCursor(nx, 14);
-    tft_->print(buf);
+  constexpr int kDotX = 54;
+  constexpr int kDotY = 17;
+  tft_->fillRect(kDotX - 8, kDotY - 8, 16, 16, kBg);
+  if (lit) {
+    tft_->fillCircle(kDotX, kDotY, 5, kHitKick);
+  } else {
+    tft_->drawCircle(kDotX, kDotY, 3, darken_(kHitKick, 0.45f));
   }
+}
 
-  constexpr int kDotX = 62;
-  constexpr int kKickY = 10;
-  constexpr int kSnareY = 26;
-  tft_->fillRect(kTextW, 0, kBpmZoneW - kTextW, kHeaderH, kBg);
-
-  auto drawHitDot = [&](int cx, int cy, float level, uint16_t lit) {
-    if (level < 0.0f) {
-      level = 0.0f;
-    }
-    if (level > 1.0f) {
-      level = 1.0f;
-    }
-    const int r = 2 + static_cast<int>(level * 3.0f + 0.5f);  // 2..5
-    const uint16_t col = darken_(lit, 0.18f + level * 0.82f);
-    tft_->fillCircle(cx, cy, r, col);
-    if (level < 0.08f) {
-      tft_->drawCircle(cx, cy, 3, darken_(lit, 0.30f));
-    }
-  };
-  drawHitDot(kDotX, kKickY, ctx.kickPulse, kHitKick);
-  drawHitDot(kDotX, kSnareY, ctx.snarePulse, kHitSnare);
+// Kept for header API compatibility; logic lives in drawDancingCat_.
+void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock, int bpmShow) {
+  (void)ctx;
+  drawBpmBadgeText_(beatLock, bpmShow);
+  drawBeatDot_(false);
 }
 
 #if defined(BOARD_CARDPUTER_ADV)

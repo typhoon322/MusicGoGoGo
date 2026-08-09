@@ -20,8 +20,7 @@ struct VfxDrawContext {
   VfxMode mode;
   float beatBpm = 0.0f;
   float beatConfidence = 0.0f;
-  float kickPulse = 0.0f;
-  float snarePulse = 0.0f;
+  float beatPulse = 0.0f;  // onset flash 0..1
 #if defined(BOARD_CARDPUTER_ADV)
   bool showMicDebug = false;
   int8_t batteryPercent = -1;
@@ -60,7 +59,9 @@ class VfxRenderer {
   uint16_t darken_(uint16_t color, float factor) const;
   void drawHeader_(const VfxDrawContext &ctx);
   void drawDancingCat_(const VfxDrawContext &ctx);
-  void drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock);
+  void drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock, int bpmShow);
+  void drawBpmBadgeText_(bool beatLock, int bpmShow);
+  void drawBeatDot_(bool lit);
 #if defined(BOARD_CARDPUTER_ADV)
   void drawBatteryBadge_(const VfxDrawContext &ctx);
   void drawMicDebugOverlay_(const VfxDrawContext &ctx);
@@ -102,8 +103,12 @@ class VfxRenderer {
   int lastBpmDrawn_ = -2;  // -1 = "--", -2 = force redraw
   int heldBpmDisplay_ = -1;
   bool lastBpmLockDrawn_ = false;
-  int lastKickDotLevel_ = -1;
-  int lastSnareDotLevel_ = -1;
+  int lastBeatDotLevel_ = -1;
+  int lastCatWalkFrame_ = -1;
+  int lastCatDirDrawn_ = 0;
+  float catStepAccum_ = 0.0f;
+  float catWalkBpmSmooth_ = 0.0f;
+  uint32_t lastCatMotionMs_ = 0;
   int prevBarH_[64] = {};
   int prevPeakH_[64] = {};
   int lastBarLabelCount_ = -1;
