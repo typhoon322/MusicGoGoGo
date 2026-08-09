@@ -79,7 +79,14 @@ bool I2sMic::readSamples(int16_t *out, size_t count) {
     return false;
   }
 
-  int32_t *buf = static_cast<int32_t *>(malloc(count * sizeof(int32_t)));
+  // Static scratch avoids per-frame heap churn (was malloc/free every FFT).
+  static int32_t *buf = nullptr;
+  static size_t bufCap = 0;
+  if (buf == nullptr || bufCap < count) {
+    free(buf);
+    buf = static_cast<int32_t *>(malloc(count * sizeof(int32_t)));
+    bufCap = buf != nullptr ? count : 0;
+  }
   if (buf == nullptr) {
     return false;
   }
@@ -89,7 +96,6 @@ bool I2sMic::readSamples(int16_t *out, size_t count) {
       i2s_read(I2S_PORT, buf, count * static_cast<size_t>(sizeof(int32_t)), &bytesRead,
                portMAX_DELAY);
   if (err != ESP_OK) {
-    free(buf);
     return false;
   }
 
@@ -114,7 +120,6 @@ bool I2sMic::readSamples(int16_t *out, size_t count) {
     }
     sumSq += static_cast<double>(sample) * static_cast<double>(sample);
   }
-  free(buf);
 
   lastPeak_ = peak / 32768.0f;
   lastRms_ = static_cast<float>(sqrt(sumSq / static_cast<double>(count))) / 32768.0f;

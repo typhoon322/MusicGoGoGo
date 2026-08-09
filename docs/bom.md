@@ -6,7 +6,7 @@
 
 | 维度 | 选择 |
 |------|------|
-| MCU | ESP32-S3 DevKitC-1（8MB Flash + OPI PSRAM） |
+| MCU | ESP32-S3 DevKitC-1 **N16R8**（16MB Flash + 8MB OPI PSRAM） |
 | 音频输入 | INMP441 I2S 数字麦克风（环境拾音） |
 | 显示 | ST7789 TFT 3.2" 320×240（SPI） |
 | 供电 | USB 5V（开发板 LDO 转 3.3V） |
@@ -21,7 +21,7 @@
 
 | 序号 | 名称 | 规格/型号 | 数量 | 参考单价 | 备注 |
 |------|------|-----------|------|----------|------|
-| 1 | ESP32-S3 开发板 | DevKitC-1，**8MB Flash + OPI PSRAM**（N16R8 / N8R8） | 1 | ¥25–45 | 与 TempControl `esp32-s3-dev` env 同款；**勿买无 PSRAM 版** |
+| 1 | ESP32-S3 开发板 | DevKitC-1，**N16R8：16MB Flash + 8MB OPI PSRAM** | 1 | ¥25–45 | 与 `esp32-s3-dev` env 同款；**勿买无 PSRAM 版** |
 | 2 | INMP441 麦克风模块 | I2S，3.3V，带 L/R 声道选择 | 1 | ¥3–8 | L/R 接 **GND** = 左声道单麦；VDD 必须 3.3V |
 | 3 | ST7789 TFT 模块 | 3.2" 320×240，**4-wire SPI**（非 8080 并口） | 1 | ¥18–30 | 确认驱动 ST7789；带 PCB 排针版 |
 | 4 | 杜邦线 / 排线 | 母对母 | 1 套 | ¥3–8 | 麦 4 芯 + 屏 8 芯 |

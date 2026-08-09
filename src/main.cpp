@@ -40,6 +40,11 @@ bool autoCycleEnabled = false;
 // Runtime-tunable timings (defaults from board headers)
 uint32_t g_frameMs = SPECTRUM_FRAME_MS;
 uint32_t g_cycleMs = VFX_AUTO_CYCLE_MS;
+float g_instFps = 0.0f;
+#if !defined(BOARD_CARDPUTER_ADV)
+static volatile bool g_requestNoiseCal = false;
+#endif
+
 
 static void cfgDirty() {
   settings.markDirty();
@@ -61,6 +66,9 @@ static void cfgCapture() {
   d.bassGain = spectrum.bassGain();
   d.midGain = spectrum.midGain();
   d.trebleGain = spectrum.trebleGain();
+  d.noiseMargin = spectrum.noiseMargin();
+  d.dbRange = spectrum.dbRange();
+  d.agcTarget = bandLinear.agcTarget();
 #if !defined(BOARD_CARDPUTER_ADV)
   d.potEnabled = gainPot.enabled();
 #endif
@@ -93,6 +101,11 @@ static void applyLoadedSettings() {
   bandMirror.setAutoLevelEnabled(d.autoLevel);
   display.setShowFreqLabels(d.freqLabels);
   spectrum.setEqGains(d.bassGain, d.midGain, d.trebleGain);
+  spectrum.setNoiseMargin(d.noiseMargin);
+  spectrum.setDbRange(d.dbRange);
+  bandLinear.setAgcTarget(d.agcTarget);
+  bandLog.setAgcTarget(d.agcTarget);
+  bandMirror.setAgcTarget(d.agcTarget);
   display.setBacklight(d.brightness);
 #if !defined(BOARD_CARDPUTER_ADV)
   gainPot.setEnabled(d.potEnabled);
@@ -251,9 +264,56 @@ static void wbSetTrebleGain(float g) {
   spectrum.setTrebleGain(g);
   cfgTouch();
 }
+static float wbGetNoiseMargin() {
+  return spectrum.noiseMargin();
+}
+static void wbSetNoiseMargin(float v) {
+  spectrum.setNoiseMargin(v);
+  cfgTouch();
+}
+static float wbGetDbRange() {
+  return spectrum.dbRange();
+}
+static void wbSetDbRange(float v) {
+  spectrum.setDbRange(v);
+  cfgTouch();
+}
+static float wbGetAgcTarget() {
+  return bandLinear.agcTarget();
+}
+static void wbSetAgcTarget(float v) {
+  bandLinear.setAgcTarget(v);
+  bandLog.setAgcTarget(v);
+  bandMirror.setAgcTarget(v);
+  cfgTouch();
+}
+static void wbRequestNoiseCal() {
+#if !defined(BOARD_CARDPUTER_ADV)
+  g_requestNoiseCal = true;
+  Serial.println(F("[web] noise recalibration requested"));
+#endif
+}
+static void wbSaveSettings() {
+  cfgCapture();
+  settings.saveNow();
+}
+#if !defined(BOARD_CARDPUTER_ADV)
+static void runNoiseCalibration() {
+  Serial.println(F("[fft] noise cal start — keep quiet"));
+  spectrum.beginNoiseCalibration();
+  const uint32_t calMs = 2500;
+  const uint32_t t0 = millis();
+  while (millis() - t0 < calMs) {
+    if (audioMic.readSamples(sampleBuffer, FFT_HOP)) {
+      spectrum.analyze(sampleBuffer, FFT_HOP);
+    }
+    delay(1);
+  }
+  spectrum.finishNoiseCalibration();
+}
+#endif
 static float wbGetFps() {
-  const uint32_t elapsed = millis();
-  return elapsed > 0 ? frameCount * 1000.0f / static_cast<float>(elapsed) : 0.0f;
+  return g_instFps;
 }
 static float wbGetVu() {
   return spectrum.frame().vuLevel;
@@ -303,6 +363,14 @@ static void setupWebUi() {
   cb.setMidGain = wbSetMidGain;
   cb.getTrebleGain = wbGetTrebleGain;
   cb.setTrebleGain = wbSetTrebleGain;
+  cb.getNoiseMargin = wbGetNoiseMargin;
+  cb.setNoiseMargin = wbSetNoiseMargin;
+  cb.getDbRange = wbGetDbRange;
+  cb.setDbRange = wbSetDbRange;
+  cb.getAgcTarget = wbGetAgcTarget;
+  cb.setAgcTarget = wbSetAgcTarget;
+  cb.requestNoiseCal = wbRequestNoiseCal;
+  cb.saveSettings = wbSaveSettings;
   cb.getFps = wbGetFps;
   cb.getVu = wbGetVu;
   cb.getRms = wbGetRms;
@@ -315,11 +383,8 @@ static void setupWebUi() {
 #endif
 
 void printStatus() {
-  const uint32_t elapsed = millis();
-  const float fps =
-      elapsed > 0 ? frameCount * 1000.0f / static_cast<float>(elapsed) : 0.0f;
   Serial.printf("[status] mode=%s fps=%.1f vu=%.2f gain=%.1f auto=%.1f\n",
-                vfxModeName(display.mode()), fps, spectrum.frame().vuLevel, audioMic.gain(),
+                vfxModeName(display.mode()), g_instFps, spectrum.frame().vuLevel, audioMic.gain(),
                 bandLinear.autoGain());
   const uint32_t frames = frameCount > 0 ? frameCount : 1;
   Serial.printf("[prof] read=%lu fft=%lu band=%lu render=%lu us\n", profReadUs / frames,
@@ -660,7 +725,7 @@ static void parseSerialCommand(char *line) {
       Serial.printf(
           "[cfg] mode=%u gain=%.2f bright=%u auto=%u cyc=%lu frm=%lu "
           "atk=%.2f dec=%.2f peak=%.3f al=%u labels=%u pot=%u "
-          "eq=%.2f/%.2f/%.2f\n",
+          "eq=%.2f/%.2f/%.2f nm=%.2f db=%.0f agc=%.2f\n",
           d.mode, d.gain, d.brightness, d.autoCycle ? 1 : 0,
           static_cast<unsigned long>(d.cycleMs), static_cast<unsigned long>(d.frameMs),
           d.attack, d.decay, d.peakDecay, d.autoLevel ? 1 : 0, d.freqLabels ? 1 : 0,
@@ -669,7 +734,7 @@ static void parseSerialCommand(char *line) {
 #else
           0,
 #endif
-          d.bassGain, d.midGain, d.trebleGain);
+          d.bassGain, d.midGain, d.trebleGain, d.noiseMargin, d.dbRange, d.agcTarget);
     }
     return;
   }
@@ -720,6 +785,13 @@ void setup() {
   Serial.println();
   Serial.printf("[boot] %s vfx modes=%u\n", BOARD_NAME,
                 static_cast<unsigned>(VfxMode::Count));
+#if defined(BOARD_S3_DEV)
+  Serial.printf("[mem] flash=%u KB  psram=%u KB  free_psram=%u KB  free_heap=%u KB\n",
+                static_cast<unsigned>(ESP.getFlashChipSize() / 1024),
+                static_cast<unsigned>(ESP.getPsramSize() / 1024),
+                static_cast<unsigned>(ESP.getFreePsram() / 1024),
+                static_cast<unsigned>(ESP.getFreeHeap() / 1024));
+#endif
   settings.begin();
 
 #if defined(BOARD_CARDPUTER_ADV)
@@ -770,9 +842,9 @@ void setup() {
   bandLinear.setAutoLevelEnabled(false);
   bandLog.setAutoLevelEnabled(false);
   bandMirror.setAutoLevelEnabled(false);
-  bandLinear.setDecay(SPECTRUM_DECAY_CARDPUTER);
-  bandLog.setDecay(SPECTRUM_DECAY_CARDPUTER);
-  bandMirror.setDecay(SPECTRUM_DECAY_CARDPUTER);
+  bandLinear.setRelease(0.12f);
+  bandLog.setRelease(0.12f);
+  bandMirror.setRelease(0.12f);
   audioMic.setGain(CARDPUTER_MIC_GAIN);
   cardputerBatteryPct = static_cast<int8_t>(M5Cardputer.Power.getBatteryLevel());
   lastBatteryReadMs = millis();
@@ -793,6 +865,12 @@ void setup() {
 #endif
     cfgCapture();
   }
+
+#if !defined(BOARD_CARDPUTER_ADV)
+  // Quiet-room noise-floor calibration (INMP441 hiss → gate)
+  display.showSplash();
+  runNoiseCalibration();
+#endif
   delay(400);
   lastModeCycleMs = millis();
   memset(sampleBuffer, 0, sizeof(sampleBuffer));
@@ -835,21 +913,27 @@ void loop() {
 #else
   handleInput();
 #endif
-  const uint32_t now = millis();
+#if !defined(BOARD_CARDPUTER_ADV)
+  if (g_requestNoiseCal) {
+    g_requestNoiseCal = false;
+    runNoiseCalibration();
+  }
+#endif
+  const uint32_t frameStartMs = millis();
 
-  if (autoCycleEnabled && g_cycleMs > 0 && now - lastModeCycleMs >= g_cycleMs) {
+  if (autoCycleEnabled && g_cycleMs > 0 && frameStartMs - lastModeCycleMs >= g_cycleMs) {
     display.nextMode();
-    lastModeCycleMs = now;
+    lastModeCycleMs = frameStartMs;
     cfgTouch();
   }
 
   uint32_t t0 = micros();
-  if (!audioMic.readSamples(sampleBuffer, FFT_SIZE)) {
+  if (!audioMic.readSamples(sampleBuffer, FFT_HOP)) {
     memset(sampleBuffer, 0, sizeof(sampleBuffer));
   }
   uint32_t t1 = micros();
 
-  spectrum.analyze(sampleBuffer, FFT_SIZE);
+  spectrum.analyze(sampleBuffer, FFT_HOP);
   const SpectrumFrame &frame = spectrum.frame();
   uint32_t t2 = micros();
 
@@ -886,10 +970,10 @@ void loop() {
   }
 
 #if defined(BOARD_CARDPUTER_ADV)
-  if (now - lastBatteryReadMs >= 1000) {
+  if (frameStartMs - lastBatteryReadMs >= 1000) {
     cardputerBatteryPct =
         static_cast<int8_t>(M5Cardputer.Power.getBatteryLevel());
-    lastBatteryReadMs = now;
+    lastBatteryReadMs = frameStartMs;
   }
 
   MicDebugInfo micDbg;
@@ -916,14 +1000,19 @@ void loop() {
 
   ++frameCount;
 
-  if (now - lastStatusMs >= STATUS_LOG_MS) {
-    printStatus();
-    lastStatusMs = now;
+  // Pace from THIS frame's start so I2S wait isn't followed by another full delay.
+  const uint32_t spentMs = millis() - frameStartMs;
+  if (spentMs < g_frameMs) {
+    delay(g_frameMs - spentMs);
+  }
+  const uint32_t framePeriod = millis() - frameStartMs;
+  if (framePeriod > 0) {
+    const float inst = 1000.0f / static_cast<float>(framePeriod);
+    g_instFps = g_instFps <= 0.1f ? inst : (g_instFps * 0.8f + inst * 0.2f);
   }
 
-  const uint32_t elapsed = now - lastFrameMs;
-  if (elapsed < g_frameMs) {
-    delay(g_frameMs - elapsed);
+  if (millis() - lastStatusMs >= STATUS_LOG_MS) {
+    printStatus();
+    lastStatusMs = millis();
   }
-  lastFrameMs = millis();
 }

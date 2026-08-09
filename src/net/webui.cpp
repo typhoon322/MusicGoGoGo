@@ -72,18 +72,40 @@ a{color:var(--acc)}
 </div>
 
 <div class="card">
-<h2>频段 EQ</h2>
-<p style="color:var(--dim);font-size:12px;margin:0 0 8px">低/中/高各 1/3 柱；1.0=不削不抬。空调噪声可把低频调到 0.5 左右。</p>
+<h2>电平 / 噪声门</h2>
+<p style="color:var(--dim);font-size:12px;margin:0 0 8px">调灵敏度。改完约 0.5s 自动写入 Flash；也可点「立即保存」。</p>
 <div class="row">
-<label>低频 (1–10 · ~20–200Hz) <b id="v-bass"></b></label>
+<label>噪声门限 (越大越安静/越钝) <b id="v-nmargin"></b></label>
+<input type="range" id="nmargin" min="1.00" max="1.50" step="0.01">
+</div>
+<div class="row">
+<label>动态范围 dB (越小越敏感) <b id="v-dbrange"></b></label>
+<input type="range" id="dbrange" min="24" max="72" step="1">
+</div>
+<div class="row">
+<label>AGC 目标 (越大越易顶满) <b id="v-agctgt"></b></label>
+<input type="range" id="agctgt" min="0.40" max="0.95" step="0.01">
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+<button type="button" id="ncal" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--tx)">重新校准底噪</button>
+<button type="button" id="cfgsave" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:#000">立即保存</button>
+</div>
+<p id="ncal-msg" style="color:var(--dim);font-size:12px;margin-top:8px"></p>
+</div>
+
+<div class="card">
+<h2>频段 EQ</h2>
+<p style="color:var(--dim);font-size:12px;margin:0 0 8px">低/中/高为曲线控制点，柱间线性过渡（无阶梯）。1.0=平坦；空调噪声可把低频调到 ~0.5。</p>
+<div class="row">
+<label>低频 (左侧控制点) <b id="v-bass"></b></label>
 <input type="range" id="bass" min="0" max="2" step="0.05">
 </div>
 <div class="row">
-<label>中频 (11–20 · ~200Hz–2k) <b id="v-mid"></b></label>
+<label>中频 (中间控制点) <b id="v-mid"></b></label>
 <input type="range" id="mid" min="0" max="2" step="0.05">
 </div>
 <div class="row">
-<label>高频 (21–30 · ~2–20k) <b id="v-treble"></b></label>
+<label>高频 (右侧控制点) <b id="v-treble"></b></label>
 <input type="range" id="treble" min="0" max="2" step="0.05">
 </div>
 </div>
@@ -93,11 +115,11 @@ a{color:var(--acc)}
 <div class="grid2">
 <div class="row">
 <label>Attack <b id="v-attack"></b></label>
-<input type="range" id="attack" min="0.05" max="0.99" step="0.01">
+<input type="range" id="attack" min="0.1" max="0.9" step="0.01">
 </div>
 <div class="row">
-<label>Decay <b id="v-decay"></b></label>
-<input type="range" id="decay" min="0.1" max="0.99" step="0.01">
+<label>Release <b id="v-decay"></b></label>
+<input type="range" id="decay" min="0.05" max="0.5" step="0.01">
 </div>
 <div class="row">
 <label>Peak 衰减 <b id="v-peak"></b></label>
@@ -198,6 +220,12 @@ async function state(){
     $('v-mid').textContent=Number(s.midGain).toFixed(2);
     if(document.activeElement!==$('treble'))$('treble').value=s.trebleGain;
     $('v-treble').textContent=Number(s.trebleGain).toFixed(2);
+    if(document.activeElement!==$('nmargin'))$('nmargin').value=s.noiseMargin;
+    $('v-nmargin').textContent=Number(s.noiseMargin).toFixed(2);
+    if(document.activeElement!==$('dbrange'))$('dbrange').value=s.dbRange;
+    $('v-dbrange').textContent=Number(s.dbRange).toFixed(0);
+    if(document.activeElement!==$('agctgt'))$('agctgt').value=s.agcTarget;
+    $('v-agctgt').textContent=Number(s.agcTarget).toFixed(2);
   }catch(e){}
 }
 function paintModes(cur){
@@ -223,6 +251,21 @@ bind('gain','input',v=>Number(v).toFixed(2));
 bind('bass','input',v=>Number(v).toFixed(2));
 bind('mid','input',v=>Number(v).toFixed(2));
 bind('treble','input',v=>Number(v).toFixed(2));
+bind('nmargin','input',v=>Number(v).toFixed(2));
+$('dbrange').addEventListener('input',()=>{
+  ctrl('dbrange='+$('dbrange').value);
+  $('v-dbrange').textContent=$('dbrange').value;
+});
+bind('agctgt','input',v=>Number(v).toFixed(2));
+$('ncal').addEventListener('click',async()=>{
+  $('ncal-msg').textContent='校准中：请保持安静约 2.5 秒…';
+  await ctrl('ncal=1');
+  setTimeout(()=>{$('ncal-msg').textContent='校准已触发（板端进行中）';},400);
+});
+$('cfgsave').addEventListener('click',async()=>{
+  await ctrl('save=1');
+  $('ncal-msg').textContent='已请求立即保存到 Flash';
+});
 bind('attack','input',v=>Number(v).toFixed(2));
 bind('decay','input',v=>Number(v).toFixed(2));
 bind('peak','input',v=>Number(v).toFixed(3));
@@ -312,6 +355,9 @@ void WebUi::startServer_() {
     json += ",\"bassGain\":" + String(cb_.getBassGain(), 3);
     json += ",\"midGain\":" + String(cb_.getMidGain(), 3);
     json += ",\"trebleGain\":" + String(cb_.getTrebleGain(), 3);
+    json += ",\"noiseMargin\":" + String(cb_.getNoiseMargin ? cb_.getNoiseMargin() : 1.12f, 3);
+    json += ",\"dbRange\":" + String(cb_.getDbRange ? cb_.getDbRange() : 42.0f, 1);
+    json += ",\"agcTarget\":" + String(cb_.getAgcTarget ? cb_.getAgcTarget() : 0.72f, 3);
     json += ",\"uptime\":" + String(cb_.getUptimeMs() / 1000);
     json += "}";
     request->send(200, "application/json", json);
@@ -361,6 +407,21 @@ void WebUi::startServer_() {
     }
     if (request->hasParam("treble") && cb_.setTrebleGain) {
       cb_.setTrebleGain(request->arg("treble").toFloat());
+    }
+    if (request->hasParam("nmargin") && cb_.setNoiseMargin) {
+      cb_.setNoiseMargin(request->arg("nmargin").toFloat());
+    }
+    if (request->hasParam("dbrange") && cb_.setDbRange) {
+      cb_.setDbRange(request->arg("dbrange").toFloat());
+    }
+    if (request->hasParam("agctgt") && cb_.setAgcTarget) {
+      cb_.setAgcTarget(request->arg("agctgt").toFloat());
+    }
+    if (request->hasParam("ncal") && cb_.requestNoiseCal) {
+      cb_.requestNoiseCal();
+    }
+    if (request->hasParam("save") && cb_.saveSettings) {
+      cb_.saveSettings();
     }
     request->send(200, "application/json", "{\"ok\":true}");
   });

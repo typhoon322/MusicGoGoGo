@@ -57,5 +57,10 @@ class DisplayDriver {
 #endif
   VfxMode mode_ = VfxMode::Bars32;
   size_t waterfallHead_ = 0;
+#if defined(BOARD_S3_DEV)
+  // Allocated in PSRAM at begin() — keeps ~150KB+ off internal heap.
+  float *waterfallHistory_ = nullptr;
+#else
   float waterfallHistory_[VFX_WATERFALL_HISTORY * VFX_WATERFALL_BINS] = {};
+#endif
 };

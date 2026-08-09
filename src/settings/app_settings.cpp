@@ -15,6 +15,36 @@ float clampEq(float g) {
   }
   return g;
 }
+
+float clampNoiseMargin(float m) {
+  if (m < 1.00f) {
+    return 1.00f;
+  }
+  if (m > 1.60f) {
+    return 1.60f;
+  }
+  return m;
+}
+
+float clampDbRange(float db) {
+  if (db < 24.0f) {
+    return 24.0f;
+  }
+  if (db > 72.0f) {
+    return 72.0f;
+  }
+  return db;
+}
+
+float clampAgcTarget(float t) {
+  if (t < 0.40f) {
+    return 0.40f;
+  }
+  if (t > 0.95f) {
+    return 0.95f;
+  }
+  return t;
+}
 }  // namespace
 
 void AppSettings::begin() {
@@ -52,16 +82,37 @@ void AppSettings::load() {
   data_.bassGain = prefs.getFloat("eqBass", data_.bassGain);
   data_.midGain = prefs.getFloat("eqMid", data_.midGain);
   data_.trebleGain = prefs.getFloat("eqTreble", data_.trebleGain);
+  data_.noiseMargin = prefs.getFloat("nMargin", data_.noiseMargin);
+  data_.dbRange = prefs.getFloat("dbRange", data_.dbRange);
+  data_.agcTarget = prefs.getFloat("agcTgt", data_.agcTarget);
   prefs.end();
 
-  // v1/v2 -> v3: labels default off; EQ flat (no built-in bass cut)
   if (ver > 0 && ver < kVersion) {
     if (ver < 2) {
       data_.freqLabels = false;
     }
-    data_.bassGain = 1.0f;
-    data_.midGain = 1.0f;
-    data_.trebleGain = 1.0f;
+    if (ver < 3) {
+      data_.bassGain = 1.0f;
+      data_.midGain = 1.0f;
+      data_.trebleGain = 1.0f;
+    }
+    if (ver < 4) {
+      data_.frameMs = SPECTRUM_FRAME_MS;
+    }
+    if (ver < 5) {
+      data_.frameMs = SPECTRUM_FRAME_MS;
+    }
+    if (ver < 6) {
+      data_.attack = 0.50f;
+      data_.decay = 0.10f;
+      data_.peakDecay = 0.92f;
+      data_.frameMs = SPECTRUM_FRAME_MS;
+    }
+    if (ver < 7) {
+      data_.noiseMargin = 1.12f;
+      data_.dbRange = 42.0f;
+      data_.agcTarget = 0.72f;
+    }
     dirty_ = true;
     dirtyAtMs_ = 0;
   }
@@ -77,14 +128,27 @@ void AppSettings::load() {
   data_.bassGain = clampEq(data_.bassGain);
   data_.midGain = clampEq(data_.midGain);
   data_.trebleGain = clampEq(data_.trebleGain);
+  data_.noiseMargin = clampNoiseMargin(data_.noiseMargin);
+  data_.dbRange = clampDbRange(data_.dbRange);
+  data_.agcTarget = clampAgcTarget(data_.agcTarget);
+  if (data_.decay < 0.02f) {
+    data_.decay = 0.02f;
+  }
+  if (data_.decay > 0.55f) {
+    data_.decay = 0.10f;
+  }
+  if (data_.attack < 0.05f) {
+    data_.attack = 0.05f;
+  }
+  if (data_.attack > 0.95f) {
+    data_.attack = 0.95f;
+  }
 
   loaded_ = true;
   Serial.printf(
-      "[cfg] loaded mode=%u gain=%.2f bright=%u auto=%u labels=%u pot=%u "
-      "eq=%.2f/%.2f/%.2f\n",
-      data_.mode, data_.gain, data_.brightness, data_.autoCycle ? 1 : 0,
-      data_.freqLabels ? 1 : 0, data_.potEnabled ? 1 : 0, data_.bassGain, data_.midGain,
-      data_.trebleGain);
+      "[cfg] loaded mode=%u gain=%.2f nm=%.2f db=%.0f agc=%.2f eq=%.2f/%.2f/%.2f\n",
+      data_.mode, data_.gain, data_.noiseMargin, data_.dbRange, data_.agcTarget, data_.bassGain,
+      data_.midGain, data_.trebleGain);
 }
 
 void AppSettings::saveNow() {
@@ -109,6 +173,9 @@ void AppSettings::saveNow() {
   prefs.putFloat("eqBass", data_.bassGain);
   prefs.putFloat("eqMid", data_.midGain);
   prefs.putFloat("eqTreble", data_.trebleGain);
+  prefs.putFloat("nMargin", data_.noiseMargin);
+  prefs.putFloat("dbRange", data_.dbRange);
+  prefs.putFloat("agcTgt", data_.agcTarget);
   prefs.end();
   dirty_ = false;
   Serial.println(F("[cfg] saved"));

@@ -40,6 +40,15 @@ struct WebCallbacks {
   float (*getTrebleGain)() = nullptr;
   void (*setTrebleGain)(float) = nullptr;
 
+  float (*getNoiseMargin)() = nullptr;
+  void (*setNoiseMargin)(float) = nullptr;
+  float (*getDbRange)() = nullptr;
+  void (*setDbRange)(float) = nullptr;
+  float (*getAgcTarget)() = nullptr;
+  void (*setAgcTarget)(float) = nullptr;
+  void (*requestNoiseCal)() = nullptr;
+  void (*saveSettings)() = nullptr;
+
   float (*getFps)() = nullptr;
   float (*getVu)() = nullptr;
   float (*getRms)() = nullptr;

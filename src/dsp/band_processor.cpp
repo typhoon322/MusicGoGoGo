@@ -15,7 +15,17 @@ void BandProcessor::reset() {
     peaks_[i] = 0.0f;
   }
   autoGain_ = 1.0f;
-  levelTrack_ = 0.08f;
+  levelTrack_ = 0.12f;
+}
+
+void BandProcessor::setAgcTarget(float t) {
+  if (t < 0.40f) {
+    t = 0.40f;
+  }
+  if (t > 0.95f) {
+    t = 0.95f;
+  }
+  agcTarget_ = t;
 }
 
 void BandProcessor::process(const float *input, float *output) {
@@ -30,45 +40,41 @@ void BandProcessor::process(const float *input, float *output) {
     }
   }
 
-  constexpr float kSilence = 0.028f;
+  // Soft AGC: don't crush quiet passages; don't zero the whole frame on mild dips.
+  constexpr float kQuiet = 0.008f;
   if (autoLevelEnabled_) {
-    // Absolute silence / noise-floor gate: do NOT let AGC inflate HVAC
-    // rumble into full-scale bars after the music stops.
-    if (framePeak < kSilence) {
-      levelTrack_ *= 0.82f;
-      if (levelTrack_ < 0.04f) {
-        levelTrack_ = 0.04f;
+    if (framePeak < kQuiet) {
+      levelTrack_ *= 0.97f;
+      if (levelTrack_ < 0.06f) {
+        levelTrack_ = 0.06f;
       }
-      autoGain_ *= 0.80f;
+      autoGain_ *= 0.97f;
       if (autoGain_ < 1.0f) {
         autoGain_ = 1.0f;
       }
     } else if (framePeak > levelTrack_) {
-      levelTrack_ = framePeak;
-      autoGain_ = 0.82f / levelTrack_;
+      // Rise slowly so sudden peaks don't instantly squash sensitivity.
+      levelTrack_ = levelTrack_ * 0.85f + framePeak * 0.15f;
+      autoGain_ = agcTarget_ / levelTrack_;
     } else {
-      levelTrack_ = levelTrack_ * 0.992f + framePeak * 0.008f;
-      if (levelTrack_ < 0.04f) {
-        levelTrack_ = 0.04f;
+      levelTrack_ = levelTrack_ * 0.995f + framePeak * 0.005f;
+      if (levelTrack_ < 0.06f) {
+        levelTrack_ = 0.06f;
       }
-      autoGain_ = 0.82f / levelTrack_;
+      autoGain_ = agcTarget_ / levelTrack_;
     }
-    if (autoGain_ < 0.35f) {
-      autoGain_ = 0.35f;
+    if (autoGain_ < 0.55f) {
+      autoGain_ = 0.55f;
     }
-    if (autoGain_ > 6.0f) {
-      autoGain_ = 6.0f;
+    if (autoGain_ > 4.5f) {
+      autoGain_ = 4.5f;
     }
   } else {
     autoGain_ = 1.0f;
   }
 
-  const bool silent = framePeak < kSilence;
-  const float decayNow = silent ? 0.48f : decay_;
-  const float peakDecayNow = silent ? 0.62f : peakDecay_;
-
   for (size_t i = 0; i < bandCount_; ++i) {
-    float target = silent ? 0.0f : (input[i] * autoGain_);
+    float target = input[i] * autoGain_;
     if (target > 1.0f) {
       target = 1.0f;
     }
@@ -76,17 +82,17 @@ void BandProcessor::process(const float *input, float *output) {
     if (target > smoothed_[i]) {
       smoothed_[i] += (target - smoothed_[i]) * attack_;
     } else {
-      smoothed_[i] = smoothed_[i] * decayNow + target * (1.0f - decayNow);
+      smoothed_[i] += (target - smoothed_[i]) * release_;
     }
 
-    if (smoothed_[i] < 0.002f) {
+    if (smoothed_[i] < 0.0015f) {
       smoothed_[i] = 0.0f;
     }
 
     if (smoothed_[i] > peaks_[i]) {
       peaks_[i] = smoothed_[i];
     } else {
-      peaks_[i] *= peakDecayNow;
+      peaks_[i] *= peakDecay_;
       if (peaks_[i] < smoothed_[i]) {
         peaks_[i] = smoothed_[i];
       }

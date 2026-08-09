@@ -37,6 +37,10 @@
 #define VFX_WATERFALL_HISTORY 200
 #endif
 
+#ifndef FFT_HOP
+#define FFT_HOP FFT_SIZE
+#endif
+
 // Web UI / WiFi AP (S3 only)
 #ifndef WEB_AP_SSID
 #define WEB_AP_SSID "MusicGoGoGo"

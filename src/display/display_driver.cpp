@@ -4,6 +4,11 @@
 #include "display/tft_colors.h"
 #include "display/vfx_renderer.h"
 
+#if defined(BOARD_S3_DEV)
+#include <esp_heap_caps.h>
+#include <string.h>
+#endif
+
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
 #include <M5Cardputer.h>
 #else
@@ -78,11 +83,30 @@ bool DisplayDriver::begin(uint8_t backlightLevel) {
   tft.invertDisplay(false);
   tft.fillScreen(TFT_COL_BLACK);
   tft.setTextWrap(false);
-  tft.setSPISpeed(20000000);
+  tft.setSPISpeed(60000000);
   vfx.attach(&tft);
   vfx.resetBarCache();
+#if defined(BOARD_S3_DEV)
+  if (waterfallHistory_ == nullptr) {
+    const size_t n = static_cast<size_t>(VFX_WATERFALL_HISTORY) * VFX_WATERFALL_BINS;
+    const size_t bytes = n * sizeof(float);
+    waterfallHistory_ = static_cast<float *>(
+        heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (waterfallHistory_ == nullptr) {
+      waterfallHistory_ = static_cast<float *>(malloc(bytes));
+    }
+    if (waterfallHistory_ != nullptr) {
+      memset(waterfallHistory_, 0, bytes);
+      Serial.printf("[mem] waterfall history %u KB @ %s\n",
+                    static_cast<unsigned>(bytes / 1024),
+                    esp_ptr_external_ram(waterfallHistory_) ? "PSRAM" : "DRAM");
+    } else {
+      Serial.println(F("[mem] waterfall history alloc FAILED"));
+    }
+  }
+#endif
   initialized_ = true;
-  Serial.printf("[tft] OK %dx%d st7789\n", TFT_WIDTH, TFT_HEIGHT);
+  Serial.printf("[tft] OK %dx%d st7789 spi=60MHz\n", TFT_WIDTH, TFT_HEIGHT);
   return true;
 #endif
 }

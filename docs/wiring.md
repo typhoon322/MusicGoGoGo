@@ -4,7 +4,7 @@
 
 | 序号 | 元件 | 数量 | 备注 |
 |------|------|------|------|
-| 1 | ESP32-S3 开发板（8MB Flash + OPI PSRAM） | 1 | DevKitC-1，N16R8 / N8R8 |
+| 1 | ESP32-S3 开发板（N16R8：16MB Flash + 8MB OPI PSRAM） | 1 | DevKitC-1 |
 | 2 | INMP441 I2S 麦克风模块 | 1 | L/R 接 GND = 左声道 |
 | 3 | ST7789 TFT 3.2 寸 | 1 | 320×240，4-wire SPI |
 | 4 | 杜邦线 | 若干 | 3.3V 逻辑 |

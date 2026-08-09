@@ -55,6 +55,7 @@ class VfxRenderer {
   uint16_t rainbowColor_(float level, float hue) const;
   uint16_t darken_(uint16_t color, float factor) const;
   void drawHeader_(const VfxDrawContext &ctx);
+  void drawDancingCat_(const VfxDrawContext &ctx);
 #if defined(BOARD_CARDPUTER_ADV)
   void drawBatteryBadge_(const VfxDrawContext &ctx);
   void drawMicDebugOverlay_(const VfxDrawContext &ctx);
@@ -86,6 +87,13 @@ class VfxRenderer {
   VfxMode lastHeaderMode_ = VfxMode::Count;
   float lastHeaderVu_ = -1.0f;
   float lastHeaderPeak_ = -1.0f;
+  // S3 header cat state
+  float catX_ = 40.0f;
+  int catDir_ = 1;
+  int prevCatX_ = -1;
+  int prevCatY_ = -1;
+  float catHopSmoothed_ = 0.0f;
+  bool catHeaderInit_ = false;
   int prevBarH_[64] = {};
   int prevPeakH_[64] = {};
   int lastBarLabelCount_ = -1;

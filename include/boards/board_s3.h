@@ -1,6 +1,6 @@
 #pragma once
 
-// ESP32-S3 development board (R16N8 DevKit)
+// ESP32-S3 DevKit — N16R8 (16MB Flash + 8MB OPI PSRAM)
 // MusicGoGoGo — INMP441 I2S mic + ST7789 3.2" TFT spectrum display
 
 #define BOARD_NAME "MusicGoGoGo"
@@ -15,8 +15,9 @@
 #define I2S_PORT I2S_NUM_0
 #define I2S_SAMPLE_RATE 44100
 #define I2S_BITS_PER_SAMPLE 32
-#define I2S_DMA_BUF_COUNT 8
-#define I2S_DMA_BUF_LEN 256
+// Deeper DMA ring so WiFi/TFT load doesn't underrun captures
+#define I2S_DMA_BUF_COUNT 16
+#define I2S_DMA_BUF_LEN 512
 
 // ST7789 TFT (SPI) — 3.2" 320×240 landscape
 #define PIN_TFT_MOSI 11
@@ -44,18 +45,22 @@
 #define TFT_X_OFFSET 0
 #define TFT_Y_OFFSET 0
 
-// FFT / spectrum — 30× 1/3-octave bands (20Hz–20kHz); Log12 keeps 12
+// FFT 2048 @ 44.1kHz ≈ 21.5 Hz/bin; hop advances window for 25–30 FPS
 #define FFT_SIZE 2048
+#define FFT_HOP 1470  // ≈30 FPS audio cadence (44100/30)
 #define SPECTRUM_BARS 30
 
 // Auto-cycle disabled by default on S3; enable anytime via Web UI / serial 'a'
 #define VFX_AUTO_CYCLE_MS 0
 
-// FFT window ≈ 2048/44100 ≈ 46 ms
+// Display budget; hop already paces ~30 FPS when DMA is fed continuously
 #ifndef SPECTRUM_FRAME_MS
-#define SPECTRUM_FRAME_MS 48
+#define SPECTRUM_FRAME_MS 33
 #endif
 
-// No usable PSRAM on this dev board — keep the waterfall ring buffer small so
-// WiFi/AsyncTCP have enough heap during boot.
-#define VFX_WATERFALL_HISTORY 80
+// Waterfall ring (PSRAM-backed on S3). Matches full plot height.
+#define VFX_WATERFALL_HISTORY 240
+
+// Taller header strip for the walking/jumping cat
+#define VFX_HEADER_H 36
+#define VFX_AREA_TOP 38

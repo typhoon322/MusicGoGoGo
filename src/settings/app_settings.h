@@ -12,15 +12,19 @@ struct AppSettingsData {
   bool autoCycle = false;
   uint32_t cycleMs = 0;
   uint32_t frameMs = 25;
-  float decay = 0.76f;
-  float attack = 0.62f;
-  float peakDecay = 0.90f;
+  float decay = 0.10f;   // release blend (fall)
+  float attack = 0.50f;  // rise
+  float peakDecay = 0.92f;
   bool autoLevel = true;
   bool freqLabels = false;
   bool potEnabled = true;
   float bassGain = 1.0f;
   float midGain = 1.0f;
   float trebleGain = 1.0f;
+  // Level / noise gate (persisted)
+  float noiseMargin = 1.12f;  // gate = floor * margin; higher = deafer
+  float dbRange = 42.0f;      // dB span to full bar; lower = more sensitive
+  float agcTarget = 0.72f;    // AGC aim level; higher = bars fill easier
 };
 
 class AppSettings {
@@ -38,7 +42,7 @@ class AppSettings {
 
  private:
   static constexpr const char *kNs = "mgg";
-  static constexpr uint16_t kVersion = 3;
+  static constexpr uint16_t kVersion = 7;
   static constexpr uint32_t kSaveDelayMs = 500;
 
   AppSettingsData data_;
