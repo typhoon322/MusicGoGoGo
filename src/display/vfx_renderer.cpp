@@ -171,6 +171,7 @@ void VfxRenderer::resetHeaderCache() {
   prevCatX_ = -1;
   prevCatY_ = -1;
   lastBpmDrawn_ = -2;
+  heldBpmDisplay_ = -1;
   lastBpmLockDrawn_ = false;
   lastBpmKickFlash_ = false;
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
@@ -351,7 +352,7 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
 
   constexpr float kMusicOn = 0.035f;
   const bool dancing = vu >= kMusicOn;
-  constexpr float kConfUse = 0.45f;
+  constexpr float kConfUse = 0.32f;
   const bool beatLock = dancing && ctx.beatConfidence >= kConfUse && ctx.beatBpm >= 70.0f;
 
   // Motion: beat-locked walk/hops when locked; VU fake hop when dancing;
@@ -493,16 +494,27 @@ void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
   }
 
   int bpmShow = -1;
-  if (ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.25f) {
-    bpmShow = static_cast<int>(ctx.beatBpm + 0.5f);
-    if (bpmShow < 70) {
-      bpmShow = 70;
+  // Hysteresis: keep last integer once we have had a lock recently.
+  if (ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.28f) {
+    heldBpmDisplay_ = static_cast<int>(ctx.beatBpm + 0.5f);
+    if (heldBpmDisplay_ < 70) {
+      heldBpmDisplay_ = 70;
     }
-    if (bpmShow > 160) {
-      bpmShow = 160;
+    if (heldBpmDisplay_ > 160) {
+      heldBpmDisplay_ = 160;
     }
+    bpmShow = heldBpmDisplay_;
+  } else if (heldBpmDisplay_ >= 70 && ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.12f) {
+    // Soft hold while confidence dips — avoid "--" flicker.
+    bpmShow = heldBpmDisplay_;
+  } else if (ctx.beatConfidence < 0.08f) {
+    heldBpmDisplay_ = -1;
+    bpmShow = -1;
+  } else if (heldBpmDisplay_ >= 70) {
+    bpmShow = heldBpmDisplay_;
   }
-  const bool kickFlash = beatLock && ctx.kickPulse > 0.45f;
+
+  const bool kickFlash = ctx.kickPulse > 0.18f;
   if (bpmShow == lastBpmDrawn_ && beatLock == lastBpmLockDrawn_ && kickFlash == lastBpmKickFlash_) {
     return;
   }

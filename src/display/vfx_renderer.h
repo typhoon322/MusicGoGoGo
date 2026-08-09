@@ -100,6 +100,7 @@ class VfxRenderer {
   float catHopSmoothed_ = 0.0f;
   bool catHeaderInit_ = false;
   int lastBpmDrawn_ = -2;  // -1 = "--", -2 = force redraw
+  int heldBpmDisplay_ = -1;
   bool lastBpmLockDrawn_ = false;
   bool lastBpmKickFlash_ = false;
   int prevBarH_[64] = {};
