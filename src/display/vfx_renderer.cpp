@@ -39,6 +39,7 @@ constexpr uint16_t kCatCream = 0xEF5D;
 constexpr uint16_t kCatDark = 0x8410;
 constexpr uint16_t kCatPink = 0xFCF0;
 constexpr int kCatSpriteW = 26;
+constexpr int kBpmZoneW = 56;  // left reserved for BPM badge (cat stays clear)
 constexpr int kCatSpriteH = 22;
 
 int floorBarH(int barH, int maxH) {
@@ -169,6 +170,9 @@ void VfxRenderer::resetHeaderCache() {
   catHeaderInit_ = false;
   prevCatX_ = -1;
   prevCatY_ = -1;
+  lastBpmDrawn_ = -2;
+  lastBpmLockDrawn_ = false;
+  lastBpmKickFlash_ = false;
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
   lastHeaderDrawMs_ = 0;
   lastBatteryPercent_ = -1;
@@ -385,7 +389,7 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
   }
   catHopSmoothed_ += (targetHop - catHopSmoothed_) * 0.45f;
 
-  const float minX = static_cast<float>(kCatSpriteW / 2 + 2);
+  const float minX = static_cast<float>(kBpmZoneW + kCatSpriteW / 2 + 2);
   const float maxX = static_cast<float>(TFT_WIDTH - kCatSpriteW / 2 - 2);
   if (catX_ < minX) {
     catX_ = minX;
@@ -401,19 +405,23 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
   const int cy = ground - hop;  // feet y
 
   // Erase previous + current span so fast walks don't leave crumbs.
+  // Keep left BPM badge zone intact.
   if (!catHeaderInit_) {
-    tft_->fillRect(0, 0, TFT_WIDTH, kHeaderH, kBg);
+    tft_->fillRect(kBpmZoneW, 0, TFT_WIDTH - kBpmZoneW, kHeaderH, kBg);
     catHeaderInit_ = true;
+    lastBpmDrawn_ = -2;
   } else if (prevCatX_ >= 0) {
     int left = (prevCatX_ < cx ? prevCatX_ : cx) - kCatSpriteW / 2 - 3;
     int right = (prevCatX_ > cx ? prevCatX_ : cx) + kCatSpriteW / 2 + 3;
-    if (left < 0) {
-      left = 0;
+    if (left < kBpmZoneW) {
+      left = kBpmZoneW;
     }
     if (right > TFT_WIDTH) {
       right = TFT_WIDTH;
     }
-    tft_->fillRect(left, 0, right - left, kHeaderH, kBg);
+    if (right > left) {
+      tft_->fillRect(left, 0, right - left, kHeaderH, kBg);
+    }
   }
 
   const int f = catDir_;  // +1 face right, -1 face left
@@ -475,6 +483,72 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
 
   prevCatX_ = cx;
   prevCatY_ = cy;
+
+  drawBpmBadge_(ctx, beatLock);
+}
+
+void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
+  if (tft_ == nullptr) {
+    return;
+  }
+
+  int bpmShow = -1;
+  if (ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.25f) {
+    bpmShow = static_cast<int>(ctx.beatBpm + 0.5f);
+    if (bpmShow < 70) {
+      bpmShow = 70;
+    }
+    if (bpmShow > 160) {
+      bpmShow = 160;
+    }
+  }
+  const bool kickFlash = beatLock && ctx.kickPulse > 0.45f;
+  if (bpmShow == lastBpmDrawn_ && beatLock == lastBpmLockDrawn_ && kickFlash == lastBpmKickFlash_) {
+    return;
+  }
+  lastBpmDrawn_ = bpmShow;
+  lastBpmLockDrawn_ = beatLock;
+  lastBpmKickFlash_ = kickFlash;
+
+  tft_->fillRect(0, 0, kBpmZoneW, kHeaderH, kBg);
+
+  // Soft left rail so the badge reads as a small panel, not floating glyphs.
+  const uint16_t rail = beatLock ? kAccent : darken_(kAccent, 0.35f);
+  tft_->fillRect(0, 4, 2, kHeaderH - 8, rail);
+
+  const uint16_t labelCol = beatLock ? darken_(kAccent, 0.75f) : darken_(kText, 0.45f);
+  uint16_t numCol = kText;
+  if (kickFlash) {
+    numCol = kText;
+  } else if (beatLock) {
+    numCol = kAccent;
+  } else if (bpmShow > 0) {
+    numCol = darken_(kAccent, 0.55f);
+  } else {
+    numCol = darken_(kText, 0.35f);
+  }
+
+  tft_->setTextSize(1);
+  tft_->setTextColor(labelCol);
+  tft_->setCursor(8, 3);
+  tft_->print(F("BPM"));
+
+  char buf[8];
+  if (bpmShow > 0) {
+    snprintf(buf, sizeof(buf), "%d", bpmShow);
+  } else {
+    snprintf(buf, sizeof(buf), "--");
+  }
+  tft_->setTextSize(2);
+  tft_->setTextColor(numCol);
+  // Center-ish under the label inside the badge column.
+  const int digitW = static_cast<int>(strlen(buf)) * 12;
+  int nx = 8;
+  if (digitW + 8 < kBpmZoneW) {
+    nx = 6 + (kBpmZoneW - 8 - digitW) / 2;
+  }
+  tft_->setCursor(nx, 14);
+  tft_->print(buf);
 }
 
 #if defined(BOARD_CARDPUTER_ADV)
