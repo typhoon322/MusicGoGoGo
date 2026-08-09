@@ -42,7 +42,7 @@ constexpr int kCatSpriteW = 26;
 // BPM digits + two hit dots to the right (kick blue / snare green)
 constexpr int kBpmZoneW = 78;
 constexpr int kCatSpriteH = 22;
-constexpr uint16_t kHitKick = 0x3A9F;   // soft blue
+constexpr uint16_t kHitKick = 0x001F;   // pure blue (was teal-ish, looked green)
 constexpr uint16_t kHitSnare = 0x07E0;  // green
 
 

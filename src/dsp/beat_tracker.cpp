@@ -33,15 +33,18 @@ constexpr uint32_t kIoiMaxMs = 857;
 constexpr float kIoiOutlier = 0.18f;
 
 // Kick must dominate crack/air or we treat the transient as snare/brush bleed.
-constexpr float kKickVsSnare = 1.35f;
-constexpr float kKickVsAir = 1.15f;
+constexpr float kKickVsSnare = 1.25f;
+constexpr float kKickVsAir = 1.05f;
 // Percussive: rise from near baseline, then decay (guitar stays high).
 constexpr float kKickSlowE = 0.10f;
-constexpr float kKickFluxAbs = 0.07f;
-constexpr float kKickFluxRel = 1.9f;
-constexpr float kKickQuietPrev = 0.08f;
-constexpr float kKickDecayRatio = 0.62f;
-constexpr uint32_t kKickDecayWinMs = 130;
+constexpr float kKickFluxAbs = 0.055f;
+constexpr float kKickFluxRel = 1.6f;
+constexpr float kKickQuietPrev = 0.10f;
+constexpr float kKickDecayRatio = 0.72f;
+constexpr uint32_t kKickDecayWinMs = 160;
+constexpr float kKickInstantFlux = 0.14f;
+constexpr float kSnareVsKick = 1.35f;  // snare+air must beat kick band
+constexpr float kSnareFluxAbs = 0.05f;
 constexpr uint32_t kHitDebounceMs = 150;
 constexpr uint32_t kPulseHoldMs = 110;
 }  // namespace
@@ -246,11 +249,25 @@ void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
   const float kick = sumBands_(levels, count, kKickLo, kKickHi);
   const float snare = sumBands_(levels, count, kSnareLo, kSnareHi);
   const float air = sumBands_(levels, count, kAirLo, kAirHi);
+  const float snareHi = snare + air;
 
-  // Slow energy baseline — guitar chords lift this and fail the "from quiet" test.
   slowKickEnergy_ += (kick - slowKickEnergy_) * kKickSlowE;
 
-  // Confirm pending kick only if energy decays quickly (impact), not sustained note.
+  auto acceptKick = [&]() {
+    if (lastAcceptedKickMs_ != 0 && nowMs - lastAcceptedKickMs_ < kHitDebounceMs) {
+      return;
+    }
+    lastAcceptedKickMs_ = nowMs;
+    kickHoldUntil_ = nowMs + kPulseHoldMs;
+    state_.kickPulse = 1.0f;
+    // Kick wins the window — don't also flash snare from the same thump.
+    snareHoldUntil_ = 0;
+    if (state_.snarePulse > 0.0f) {
+      state_.snarePulse = 0.0f;
+    }
+    onKickOnset_(nowMs);
+  };
+
   if (kickPending_) {
     if (kick > kickPendingPeak_) {
       kickPendingPeak_ = kick;
@@ -258,15 +275,30 @@ void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
     const uint32_t age = nowMs - kickPendingMs_;
     if (kick < kickPendingPeak_ * kKickDecayRatio && age >= 33) {
       kickPending_ = false;
-      if (lastAcceptedKickMs_ == 0 || nowMs - lastAcceptedKickMs_ >= kHitDebounceMs) {
-        lastAcceptedKickMs_ = nowMs;
-        kickHoldUntil_ = nowMs + kPulseHoldMs;
-        state_.kickPulse = 1.0f;
-        onKickOnset_(nowMs);
-      }
+      acceptKick();
     } else if (age > kKickDecayWinMs) {
-      // Stayed loud → sustained instrument, reject.
       kickPending_ = false;
+    }
+  }
+
+  const float kickPrev = prevKick_;
+  const float kickFlux = kick > kickPrev ? (kick - kickPrev) : 0.0f;
+  const bool kickCand =
+      detectOnset_(kick, prevKick_, slowKickFlux_, lastKickMs_, nowMs, kKickRefractoryMs,
+                   kKickEnergyMin);
+  if (kickCand && !kickPending_) {
+    const bool bassDominant = (kick >= snare * kKickVsSnare) && (kick >= air * kKickVsAir);
+    const bool sharp =
+        kickFlux >= kKickFluxAbs && kickFlux >= slowKickEnergy_ * kKickFluxRel;
+    const bool fromQuiet = kickPrev <= (slowKickEnergy_ * 1.25f + kKickQuietPrev);
+    if (bassDominant && sharp && fromQuiet) {
+      if (kickFlux >= kKickInstantFlux && kick >= snareHi * 1.1f) {
+        acceptKick();
+      } else {
+        kickPending_ = true;
+        kickPendingPeak_ = kick;
+        kickPendingMs_ = nowMs;
+      }
     }
   }
 
@@ -275,33 +307,13 @@ void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
   const bool snareCand =
       detectOnset_(snare, prevSnare_, slowSnareFlux_, lastSnareMs_, nowMs, kSnareRefractoryMs,
                    kSnareEnergyMin);
-  if (snareCand && snareFlux >= 0.04f &&
+  const bool recentKick = (lastAcceptedKickMs_ != 0) && (nowMs - lastAcceptedKickMs_ < 120);
+  const bool hfDominant = snareHi >= kick * kSnareVsKick;
+  if (snareCand && snareFlux >= kSnareFluxAbs && hfDominant && !recentKick && !kickPending_ &&
       (lastAcceptedSnareMs_ == 0 || nowMs - lastAcceptedSnareMs_ >= kHitDebounceMs)) {
     lastAcceptedSnareMs_ = nowMs;
     snareHoldUntil_ = nowMs + kPulseHoldMs;
     state_.snarePulse = 1.0f;
-  }
-
-  // Capture prevKick BEFORE detectOnset_ mutates it — need for percussive tests.
-  const float kickPrev = prevKick_;
-  const float kickFlux = kick > kickPrev ? (kick - kickPrev) : 0.0f;
-  const bool kickCand =
-      detectOnset_(kick, prevKick_, slowKickFlux_, lastKickMs_, nowMs, kKickRefractoryMs,
-                   kKickEnergyMin);
-  if (kickCand && !kickPending_) {
-    const bool bassDominant = (kick >= snare * kKickVsSnare) && (kick >= air * kKickVsAir);
-    const bool recentSnare = (lastAcceptedSnareMs_ != 0) && (nowMs - lastAcceptedSnareMs_ < 80);
-    const bool sharp =
-        kickFlux >= kKickFluxAbs && kickFlux >= slowKickEnergy_ * kKickFluxRel;
-    // Must rise from a relatively quiet baseline (kick thump), not ride a chord.
-    const bool fromQuiet = kickPrev <= (slowKickEnergy_ * 1.2f + kKickQuietPrev);
-    const bool ok = bassDominant && sharp && fromQuiet &&
-                    (!recentSnare || kick >= snare * 1.7f);
-    if (ok) {
-      kickPending_ = true;
-      kickPendingPeak_ = kick;
-      kickPendingMs_ = nowMs;
-    }
   }
 
   if (lastAcceptedKickMs_ != 0 && (nowMs - lastAcceptedKickMs_) > 1800) {
