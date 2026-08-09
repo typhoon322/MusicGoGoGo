@@ -20,7 +20,7 @@ Estimate tempo from room-mic audio using kick-band onsets, drive the header catâ
 | FFT | Reuse existing spectrum; no second FFT |
 | Persist BPM to NVS | No (live estimate only) |
 | WebUI | Read-only `bpm` + `beatConf` in `/api/state`; no threshold sliders this pass |
-| On-screen BPM numeral | Out of scope |
+| On-screen BPM numeral | Header top-left badge (cyan when locked; dim / `--` otherwise) |
 | Hi-hat track | Out of scope |
 
 ## Architecture
@@ -118,7 +118,7 @@ When `confidence < kConfUse` or VU below existing quiet threshold: **unchanged**
 
 - Hi-hat / full drum separation
 - WebUI editable onset thresholds
-- TFT BPM / confidence numerals
+- On-screen BPM badge (header top-left; done)
 - ML models or offline drum-stem separation
 
 ## Acceptance criteria
