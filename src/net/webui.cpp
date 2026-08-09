@@ -54,6 +54,8 @@ a{color:var(--acc)}
 <div><span>Peak</span><b id="st-peak">-</b></div>
 <div><span>自动增益</span><b id="st-ag">-</b></div>
 <div><span>增益</span><b id="st-gain">-</b></div>
+<div><span>BPM</span><b id="st-bpm">-</b></div>
+<div><span>拍置信</span><b id="st-beatconf">-</b></div>
 <div><span>运行时间</span><b id="st-up">-</b></div>
 </div>
 
@@ -199,6 +201,8 @@ async function state(){
     $('st-peak').textContent=s.peak.toFixed(3);
     $('st-ag').textContent=s.autoGain.toFixed(2);
     $('st-gain').textContent=s.gain.toFixed(2);
+    $('st-bpm').textContent=(s.bpm!=null?s.bpm:0).toFixed(1);
+    $('st-beatconf').textContent=(s.beatConf!=null?s.beatConf:0).toFixed(2);
     const up=s.uptime; const h=Math.floor(up/3600),m=Math.floor(up%3600/60),sec=up%60;
     $('st-up').textContent=h+'h'+String(m).padStart(2,'0')+'m'+String(sec).padStart(2,'0')+'s';
     if(!MODES.length){for(const m of s.modes){MODES.push(m);}}
@@ -343,6 +347,8 @@ void WebUi::startServer_() {
     json += ",\"peak\":" + String(cb_.getPeak(), 4);
     json += ",\"autoGain\":" + String(cb_.getAutoGain(), 3);
     json += ",\"gain\":" + String(cb_.getGain(), 3);
+    json += ",\"bpm\":" + String(cb_.getBpm ? cb_.getBpm() : 0.0f, 1);
+    json += ",\"beatConf\":" + String(cb_.getBeatConf ? cb_.getBeatConf() : 0.0f, 3);
     json += ",\"brightness\":" + String(cb_.getBrightness());
     json += ",\"autoCycle\":" + String(cb_.getAutoCycle() ? 1 : 0);
     json += ",\"cycleMs\":" + String(cb_.getCycleMs());

@@ -332,6 +332,12 @@ static float wbGetAutoGain() {
 static uint32_t wbGetUptimeMs() {
   return millis();
 }
+static float wbGetBpm() {
+  return beatTracker.state().bpm;
+}
+static float wbGetBeatConf() {
+  return beatTracker.state().confidence;
+}
 
 static void setupWebUi() {
   WebCallbacks cb;
@@ -378,6 +384,8 @@ static void setupWebUi() {
   cb.getRms = wbGetRms;
   cb.getPeak = wbGetPeak;
   cb.getAutoGain = wbGetAutoGain;
+  cb.getBpm = wbGetBpm;
+  cb.getBeatConf = wbGetBeatConf;
   cb.getUptimeMs = wbGetUptimeMs;
   webUi.attach(cb);
   webUi.begin(WEB_AP_SSID, WEB_AP_PASS);

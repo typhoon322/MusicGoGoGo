@@ -54,6 +54,8 @@ struct WebCallbacks {
   float (*getRms)() = nullptr;
   float (*getPeak)() = nullptr;
   float (*getAutoGain)() = nullptr;
+  float (*getBpm)() = nullptr;
+  float (*getBeatConf)() = nullptr;
   uint32_t (*getUptimeMs)() = nullptr;
 };
 
