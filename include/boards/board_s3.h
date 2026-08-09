@@ -27,6 +27,11 @@
 #define PIN_TFT_RST 14
 #define PIN_TFT_BL 3
 
+// On-board addressable RGB (DevKitC-1 v1.1 = GPIO38; v1.0 = GPIO48)
+#ifndef PIN_RGB_LED
+#define PIN_RGB_LED 38
+#endif
+
 // KY-040 rotary encoder (active LOW, internal pull-up)
 #define PIN_ENC_CLK 8
 #define PIN_ENC_DT 9

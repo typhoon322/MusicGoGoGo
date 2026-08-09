@@ -35,6 +35,9 @@ constexpr float kIoiOutlier = 0.18f;
 // Kick must dominate crack/air or we treat the transient as snare/brush bleed.
 constexpr float kKickVsSnare = 1.25f;
 constexpr float kKickVsAir = 1.05f;
+// Debounce: arm one frame, then accept; ignore repeats within window; hold pulse for UI/LED.
+constexpr uint32_t kHitDebounceMs = 150;
+constexpr uint32_t kPulseHoldMs = 110;
 }  // namespace
 
 void BeatTracker::reset() {
@@ -42,6 +45,9 @@ void BeatTracker::reset() {
   prevKick_ = prevSnare_ = 0.0f;
   slowKickFlux_ = slowSnareFlux_ = 0.0f;
   lastKickMs_ = lastSnareMs_ = lastBpmOnsetMs_ = lastGoodConfMs_ = 0;
+  lastAcceptedKickMs_ = lastAcceptedSnareMs_ = 0;
+  kickHoldUntil_ = snareHoldUntil_ = 0;
+  kickArm_ = snareArm_ = false;
   ioiCount_ = ioiHead_ = 0;
   memset(ioiMs_, 0, sizeof(ioiMs_));
 }
@@ -206,45 +212,73 @@ void BeatTracker::updateBpmFromIois_() {
   }
 }
 
+void BeatTracker::refreshPulses_(uint32_t nowMs) {
+  if (nowMs < kickHoldUntil_) {
+    state_.kickPulse = 1.0f;
+  } else {
+    state_.kickPulse *= kPulseDecay;
+    if (state_.kickPulse < 0.015f) {
+      state_.kickPulse = 0.0f;
+    }
+  }
+  if (nowMs < snareHoldUntil_) {
+    state_.snarePulse = 1.0f;
+  } else {
+    state_.snarePulse *= kPulseDecay;
+    if (state_.snarePulse < 0.015f) {
+      state_.snarePulse = 0.0f;
+    }
+  }
+}
+
 void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
-  state_.kickPulse *= kPulseDecay;
-  state_.snarePulse *= kPulseDecay;
-  if (state_.kickPulse < 0.015f) {
-    state_.kickPulse = 0.0f;
-  }
-  if (state_.snarePulse < 0.015f) {
-    state_.snarePulse = 0.0f;
-  }
+  refreshPulses_(nowMs);
 
   const float kick = sumBands_(levels, count, kKickLo, kKickHi);
   const float snare = sumBands_(levels, count, kSnareLo, kSnareHi);
   const float air = sumBands_(levels, count, kAirLo, kAirHi);
 
-  const bool snareOn =
+  const bool snareCand =
       detectOnset_(snare, prevSnare_, slowSnareFlux_, lastSnareMs_, nowMs, kSnareRefractoryMs,
                    kSnareEnergyMin);
-  if (snareOn) {
-    state_.snarePulse = 1.0f;
-    lastSnareMs_ = nowMs;
+  if (snareCand) {
+    if (!snareArm_) {
+      snareArm_ = true;  // first look — wait one more frame
+    } else if (nowMs - lastAcceptedSnareMs_ >= kHitDebounceMs) {
+      snareArm_ = false;
+      lastAcceptedSnareMs_ = nowMs;
+      snareHoldUntil_ = nowMs + kPulseHoldMs;
+      state_.snarePulse = 1.0f;
+    }
+  } else {
+    snareArm_ = false;
   }
 
   const bool kickCand =
       detectOnset_(kick, prevKick_, slowKickFlux_, lastKickMs_, nowMs, kKickRefractoryMs,
                    kKickEnergyMin);
   if (kickCand) {
-    // Spectral veto: brushes/snares light crack+air without a real sub kick.
     const bool bassDominant = (kick >= snare * kKickVsSnare) && (kick >= air * kKickVsAir);
-    // If snare/air just fired, require even stronger bass dominance.
-    const bool recentSnare = (lastSnareMs_ != 0) && (nowMs - lastSnareMs_ < 60);
+    const bool recentSnare = (lastAcceptedSnareMs_ != 0) && (nowMs - lastAcceptedSnareMs_ < 80);
     const bool ok = bassDominant && (!recentSnare || kick >= snare * 1.6f);
     if (ok) {
-      state_.kickPulse = 1.0f;
-      onKickOnset_(nowMs);
+      if (!kickArm_) {
+        kickArm_ = true;
+      } else if (nowMs - lastAcceptedKickMs_ >= kHitDebounceMs) {
+        kickArm_ = false;
+        lastAcceptedKickMs_ = nowMs;
+        kickHoldUntil_ = nowMs + kPulseHoldMs;
+        state_.kickPulse = 1.0f;
+        onKickOnset_(nowMs);
+      }
+    } else {
+      kickArm_ = false;
     }
-    // else: low-band bleed from brush — do not flash / do not feed BPM
+  } else {
+    kickArm_ = false;
   }
 
-  if (lastKickMs_ != 0 && (nowMs - lastKickMs_) > 1800) {
+  if (lastAcceptedKickMs_ != 0 && (nowMs - lastAcceptedKickMs_) > 1800) {
     state_.confidence *= kConfDecay;
   }
   if (lastGoodConfMs_ != 0 && (nowMs - lastGoodConfMs_) > 3500 && state_.confidence < 0.2f) {

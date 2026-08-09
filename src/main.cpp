@@ -8,6 +8,7 @@
 #include "dsp/beat_tracker.h"
 #include "dsp/spectrum_analyzer.h"
 #include "settings/app_settings.h"
+#include "ui/board_rgb_led.h"
 #include "vfx.h"
 
 #if defined(BOARD_CARDPUTER_ADV)
@@ -880,6 +881,7 @@ void setup() {
   // Quiet-room noise-floor calibration (INMP441 hiss → gate)
   display.showSplash();
   runNoiseCalibration();
+  boardRgbBegin();
 #endif
   delay(400);
   lastModeCycleMs = millis();
@@ -950,6 +952,7 @@ void loop() {
   const SpectrumFrame &frame = spectrum.frame();
   beatTracker.process(frame.linear32, SPECTRUM_BARS, frameStartMs);
   const BeatState &beat = beatTracker.state();
+  boardRgbUpdate(beat.kickPulse, beat.snarePulse);
   uint32_t t2 = micros();
 
   bandLinear.process(frame.linear32, smoothBars);

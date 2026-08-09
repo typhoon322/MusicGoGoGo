@@ -25,6 +25,7 @@ class BeatTracker {
   void updateBpmFromIois_();
   uint32_t medianIoi_() const;
   bool acceptIoi_(uint32_t dt) const;
+  void refreshPulses_(uint32_t nowMs);
 
   BeatState state_;
   float prevKick_ = 0.0f;
@@ -35,6 +36,14 @@ class BeatTracker {
   uint32_t lastSnareMs_ = 0;
   uint32_t lastBpmOnsetMs_ = 0;
   uint32_t lastGoodConfMs_ = 0;
+
+  // Debounce / hold for UI + LED
+  uint32_t lastAcceptedKickMs_ = 0;
+  uint32_t lastAcceptedSnareMs_ = 0;
+  uint32_t kickHoldUntil_ = 0;
+  uint32_t snareHoldUntil_ = 0;
+  bool kickArm_ = false;
+  bool snareArm_ = false;
 
   static constexpr size_t kIoiCap = 12;
   uint32_t ioiMs_[kIoiCap] = {};
