@@ -42,8 +42,6 @@ class BeatTracker {
   uint32_t lastAcceptedSnareMs_ = 0;
   uint32_t kickHoldUntil_ = 0;
   uint32_t snareHoldUntil_ = 0;
-  bool kickArm_ = false;
-  bool snareArm_ = false;
 
   static constexpr size_t kIoiCap = 12;
   uint32_t ioiMs_[kIoiCap] = {};

@@ -47,7 +47,6 @@ void BeatTracker::reset() {
   lastKickMs_ = lastSnareMs_ = lastBpmOnsetMs_ = lastGoodConfMs_ = 0;
   lastAcceptedKickMs_ = lastAcceptedSnareMs_ = 0;
   kickHoldUntil_ = snareHoldUntil_ = 0;
-  kickArm_ = snareArm_ = false;
   ioiCount_ = ioiHead_ = 0;
   memset(ioiMs_, 0, sizeof(ioiMs_));
 }
@@ -241,17 +240,11 @@ void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
   const bool snareCand =
       detectOnset_(snare, prevSnare_, slowSnareFlux_, lastSnareMs_, nowMs, kSnareRefractoryMs,
                    kSnareEnergyMin);
-  if (snareCand) {
-    if (!snareArm_) {
-      snareArm_ = true;  // first look — wait one more frame
-    } else if (nowMs - lastAcceptedSnareMs_ >= kHitDebounceMs) {
-      snareArm_ = false;
-      lastAcceptedSnareMs_ = nowMs;
-      snareHoldUntil_ = nowMs + kPulseHoldMs;
-      state_.snarePulse = 1.0f;
-    }
-  } else {
-    snareArm_ = false;
+  // Debounce = min gap after accept (not two-frame arm: onset refractory would block confirm).
+  if (snareCand && (lastAcceptedSnareMs_ == 0 || nowMs - lastAcceptedSnareMs_ >= kHitDebounceMs)) {
+    lastAcceptedSnareMs_ = nowMs;
+    snareHoldUntil_ = nowMs + kPulseHoldMs;
+    state_.snarePulse = 1.0f;
   }
 
   const bool kickCand =
@@ -261,21 +254,12 @@ void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
     const bool bassDominant = (kick >= snare * kKickVsSnare) && (kick >= air * kKickVsAir);
     const bool recentSnare = (lastAcceptedSnareMs_ != 0) && (nowMs - lastAcceptedSnareMs_ < 80);
     const bool ok = bassDominant && (!recentSnare || kick >= snare * 1.6f);
-    if (ok) {
-      if (!kickArm_) {
-        kickArm_ = true;
-      } else if (nowMs - lastAcceptedKickMs_ >= kHitDebounceMs) {
-        kickArm_ = false;
-        lastAcceptedKickMs_ = nowMs;
-        kickHoldUntil_ = nowMs + kPulseHoldMs;
-        state_.kickPulse = 1.0f;
-        onKickOnset_(nowMs);
-      }
-    } else {
-      kickArm_ = false;
+    if (ok && (lastAcceptedKickMs_ == 0 || nowMs - lastAcceptedKickMs_ >= kHitDebounceMs)) {
+      lastAcceptedKickMs_ = nowMs;
+      kickHoldUntil_ = nowMs + kPulseHoldMs;
+      state_.kickPulse = 1.0f;
+      onKickOnset_(nowMs);
     }
-  } else {
-    kickArm_ = false;
   }
 
   if (lastAcceptedKickMs_ != 0 && (nowMs - lastAcceptedKickMs_) > 1800) {
