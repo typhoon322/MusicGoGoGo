@@ -3,6 +3,7 @@
 #include "config.h"
 #include "display/tft_colors.h"
 #include "display/vfx_renderer.h"
+#include "dsp/beat_tracker.h"
 
 #if defined(BOARD_S3_DEV)
 #include <esp_heap_caps.h>
@@ -222,7 +223,8 @@ void DisplayDriver::render(const SpectrumFrame &spec, const float *levels, const
                            ,
                            const MicDebugInfo &micDebug
 #endif
-) {
+                           ,
+                           const BeatState &beat) {
   if (!initialized_ || levels == nullptr || peaks == nullptr || count == 0) {
     return;
   }
@@ -233,6 +235,10 @@ void DisplayDriver::render(const SpectrumFrame &spec, const float *levels, const
   ctx.vu = spec.vuLevel;
   ctx.frameMs = millis();
   ctx.mode = mode_;
+  ctx.beatBpm = beat.bpm;
+  ctx.beatConfidence = beat.confidence;
+  ctx.kickPulse = beat.kickPulse;
+  ctx.snarePulse = beat.snarePulse;
 #if defined(BOARD_CARDPUTER_ADV)
   ctx.showMicDebug = debugOverlay_;
   ctx.batteryPercent = micDebug.batteryPercent;

@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "config.h"
+#include "dsp/beat_tracker.h"
 #include "dsp/spectrum_analyzer.h"
 #include "vfx.h"
 
@@ -47,7 +48,8 @@ class DisplayDriver {
               ,
               const MicDebugInfo &micDebug
 #endif
-  );
+              ,
+              const BeatState &beat);
 
  private:
   bool initialized_ = false;

@@ -18,6 +18,10 @@ struct VfxDrawContext {
   float vu;
   uint32_t frameMs;
   VfxMode mode;
+  float beatBpm = 0.0f;
+  float beatConfidence = 0.0f;
+  float kickPulse = 0.0f;
+  float snarePulse = 0.0f;
 #if defined(BOARD_CARDPUTER_ADV)
   bool showMicDebug = false;
   int8_t batteryPercent = -1;

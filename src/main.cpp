@@ -5,6 +5,7 @@
 #include "config.h"
 #include "display/display_driver.h"
 #include "dsp/band_processor.h"
+#include "dsp/beat_tracker.h"
 #include "dsp/spectrum_analyzer.h"
 #include "settings/app_settings.h"
 #include "vfx.h"
@@ -24,6 +25,7 @@ using AudioMic = I2sMic;
 
 AudioMic audioMic;
 SpectrumAnalyzer spectrum;
+BeatTracker beatTracker;
 BandProcessor bandLinear;
 BandProcessor bandLog;
 BandProcessor bandMirror;
@@ -876,13 +878,16 @@ void setup() {
   memset(sampleBuffer, 0, sizeof(sampleBuffer));
   spectrum.analyze(sampleBuffer, FFT_SIZE);
   const SpectrumFrame &bootFrame = spectrum.frame();
+  beatTracker.process(bootFrame.linear32, SPECTRUM_BARS, millis());
+  const BeatState &beat = beatTracker.state();
   bandLinear.process(bootFrame.linear32, smoothBars);
   memcpy(peakBars, bandLinear.peaks(), sizeof(peakBars));
   display.render(bootFrame, smoothBars, peakBars, SPECTRUM_BARS, 0.0f, 0.0f
 #if defined(BOARD_CARDPUTER_ADV)
                  , MicDebugInfo{}
 #endif
-  );
+                 ,
+                 beat);
 #if defined(BOARD_CARDPUTER_ADV)
   bandLinear.reset();
   bandLog.reset();
@@ -893,7 +898,7 @@ void setup() {
   memset(peakBars, 0, sizeof(peakBars));
   memset(peakLog12, 0, sizeof(peakLog12));
   memset(peakMirror, 0, sizeof(peakMirror));
-  display.render(bootFrame, smoothBars, peakBars, SPECTRUM_BARS, 0.0f, 0.0f, MicDebugInfo{});
+  display.render(bootFrame, smoothBars, peakBars, SPECTRUM_BARS, 0.0f, 0.0f, MicDebugInfo{}, beat);
   Serial.println(F("[boot] ready — BtnA=mode | BtnA hold=debug | d=debug | ,/.=mode [ ]=gain | serial: 'help'"));
   Serial.flush();
 #else
@@ -935,6 +940,8 @@ void loop() {
 
   spectrum.analyze(sampleBuffer, FFT_HOP);
   const SpectrumFrame &frame = spectrum.frame();
+  beatTracker.process(frame.linear32, SPECTRUM_BARS, frameStartMs);
+  const BeatState &beat = beatTracker.state();
   uint32_t t2 = micros();
 
   bandLinear.process(frame.linear32, smoothBars);
@@ -986,9 +993,10 @@ void loop() {
   micDbg.bands[1] = frame.linear32[1];
   micDbg.bands[2] = frame.linear32[2];
   micDbg.bands[3] = frame.linear32[3];
-  display.render(frame, levels, peaks, count, audioMic.lastRms(), audioMic.lastPeak(), micDbg);
+  display.render(frame, levels, peaks, count, audioMic.lastRms(), audioMic.lastPeak(), micDbg,
+                 beat);
 #else
-  display.render(frame, levels, peaks, count, audioMic.lastRms(), audioMic.lastPeak());
+  display.render(frame, levels, peaks, count, audioMic.lastRms(), audioMic.lastPeak(), beat);
 #endif
 
   const uint32_t t4 = micros();
