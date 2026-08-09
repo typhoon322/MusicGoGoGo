@@ -5,10 +5,12 @@
 #include <string.h>
 
 namespace {
+// kick 3..9 = 40–200 Hz on kThird30EdgesHz
 constexpr size_t kKickLo = 3;
 constexpr size_t kKickHi = 9;    // inclusive
-constexpr size_t kSnareLo = 21;
-constexpr size_t kSnareHi = 23;
+// snare 20..22 = 2–4 kHz on kThird30EdgesHz
+constexpr size_t kSnareLo = 20;
+constexpr size_t kSnareHi = 22;
 constexpr uint32_t kKickRefractoryMs = 120;
 constexpr uint32_t kSnareRefractoryMs = 80;
 constexpr float kFluxMul = 1.8f;
@@ -69,10 +71,13 @@ void BeatTracker::detectOnset_(float energy, float &prevEnergy, float &slowEnv, 
           if (ioiCount_ < kIoiCap) {
             ++ioiCount_;
           }
+          updateBpm_(nowMs);
+        } else {
+          // Invalid IOI: one-step decay; silence path handles further fade.
+          state_.confidence *= kConfDecay;
         }
       }
       lastBpmOnsetMs_ = nowMs;
-      updateBpm_(nowMs);
     }
   }
 }
