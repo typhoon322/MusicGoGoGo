@@ -39,8 +39,12 @@ constexpr uint16_t kCatCream = 0xEF5D;
 constexpr uint16_t kCatDark = 0x8410;
 constexpr uint16_t kCatPink = 0xFCF0;
 constexpr int kCatSpriteW = 26;
-constexpr int kBpmZoneW = 56;  // left reserved for BPM badge (cat stays clear)
+// BPM digits + two hit dots to the right (kick blue / snare green)
+constexpr int kBpmZoneW = 78;
 constexpr int kCatSpriteH = 22;
+constexpr uint16_t kHitKick = 0x3A9F;   // soft blue
+constexpr uint16_t kHitSnare = 0x07E0;  // green
+
 
 int floorBarH(int barH, int maxH) {
   if (maxH < kMinBarPx) {
@@ -173,7 +177,8 @@ void VfxRenderer::resetHeaderCache() {
   lastBpmDrawn_ = -2;
   heldBpmDisplay_ = -1;
   lastBpmLockDrawn_ = false;
-  lastBpmKickFlash_ = false;
+  lastKickDotLevel_ = -1;
+  lastSnareDotLevel_ = -1;
 #if defined(BOARD_CARDPUTER_ADV) && CARDPUTER_USE_BUILTIN_LCD
   lastHeaderDrawMs_ = 0;
   lastBatteryPercent_ = -1;
@@ -505,7 +510,6 @@ void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
     }
     bpmShow = heldBpmDisplay_;
   } else if (heldBpmDisplay_ >= 70 && ctx.beatBpm >= 70.0f && ctx.beatConfidence >= 0.12f) {
-    // Soft hold while confidence dips — avoid "--" flicker.
     bpmShow = heldBpmDisplay_;
   } else if (ctx.beatConfidence < 0.08f) {
     heldBpmDisplay_ = -1;
@@ -514,53 +518,94 @@ void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
     bpmShow = heldBpmDisplay_;
   }
 
-  const bool kickFlash = ctx.kickPulse > 0.18f;
-  if (bpmShow == lastBpmDrawn_ && beatLock == lastBpmLockDrawn_ && kickFlash == lastBpmKickFlash_) {
+  auto pulseLevel = [](float p) -> int {
+    if (p > 0.75f) {
+      return 3;
+    }
+    if (p > 0.40f) {
+      return 2;
+    }
+    if (p > 0.12f) {
+      return 1;
+    }
+    return 0;
+  };
+  const int kickLvl = pulseLevel(ctx.kickPulse);
+  const int snareLvl = pulseLevel(ctx.snarePulse);
+
+  const bool textDirty =
+      (bpmShow != lastBpmDrawn_) || (beatLock != lastBpmLockDrawn_) || (lastKickDotLevel_ < 0);
+  const bool dotsDirty = (kickLvl != lastKickDotLevel_) || (snareLvl != lastSnareDotLevel_);
+  if (!textDirty && !dotsDirty) {
     return;
   }
   lastBpmDrawn_ = bpmShow;
   lastBpmLockDrawn_ = beatLock;
-  lastBpmKickFlash_ = kickFlash;
+  lastKickDotLevel_ = kickLvl;
+  lastSnareDotLevel_ = snareLvl;
 
-  tft_->fillRect(0, 0, kBpmZoneW, kHeaderH, kBg);
+  // Left: BPM text. Right: kick (blue) / snare (green) hit dots.
+  constexpr int kTextW = 50;
+  if (textDirty) {
+    tft_->fillRect(0, 0, kTextW, kHeaderH, kBg);
 
-  // Soft left rail so the badge reads as a small panel, not floating glyphs.
-  const uint16_t rail = beatLock ? kAccent : darken_(kAccent, 0.35f);
-  tft_->fillRect(0, 4, 2, kHeaderH - 8, rail);
+    const uint16_t rail = beatLock ? kAccent : darken_(kAccent, 0.35f);
+    tft_->fillRect(0, 4, 2, kHeaderH - 8, rail);
 
-  const uint16_t labelCol = beatLock ? darken_(kAccent, 0.75f) : darken_(kText, 0.45f);
-  uint16_t numCol = kText;
-  if (kickFlash) {
-    numCol = kText;
-  } else if (beatLock) {
-    numCol = kAccent;
-  } else if (bpmShow > 0) {
-    numCol = darken_(kAccent, 0.55f);
-  } else {
-    numCol = darken_(kText, 0.35f);
+    const uint16_t labelCol = beatLock ? darken_(kAccent, 0.75f) : darken_(kText, 0.45f);
+    const uint16_t numCol = beatLock ? kAccent : (bpmShow > 0 ? darken_(kAccent, 0.55f)
+                                                             : darken_(kText, 0.35f));
+
+    tft_->setTextSize(1);
+    tft_->setTextColor(labelCol);
+    tft_->setCursor(8, 3);
+    tft_->print(F("BPM"));
+
+    char buf[8];
+    if (bpmShow > 0) {
+      snprintf(buf, sizeof(buf), "%d", bpmShow);
+    } else {
+      snprintf(buf, sizeof(buf), "--");
+    }
+    tft_->setTextSize(2);
+    tft_->setTextColor(numCol);
+    const int digitW = static_cast<int>(strlen(buf)) * 12;
+    int nx = 8;
+    if (digitW + 8 < kTextW) {
+      nx = 6 + (kTextW - 8 - digitW) / 2;
+    }
+    tft_->setCursor(nx, 14);
+    tft_->print(buf);
   }
 
-  tft_->setTextSize(1);
-  tft_->setTextColor(labelCol);
-  tft_->setCursor(8, 3);
-  tft_->print(F("BPM"));
+  // Hit indicators — stacked to the right of the BPM digits.
+  constexpr int kDotX = 62;
+  constexpr int kKickY = 10;
+  constexpr int kSnareY = 26;
+  constexpr int kDotR = 5;
+  tft_->fillRect(kTextW, 0, kBpmZoneW - kTextW, kHeaderH, kBg);
 
-  char buf[8];
-  if (bpmShow > 0) {
-    snprintf(buf, sizeof(buf), "%d", bpmShow);
-  } else {
-    snprintf(buf, sizeof(buf), "--");
-  }
-  tft_->setTextSize(2);
-  tft_->setTextColor(numCol);
-  // Center-ish under the label inside the badge column.
-  const int digitW = static_cast<int>(strlen(buf)) * 12;
-  int nx = 8;
-  if (digitW + 8 < kBpmZoneW) {
-    nx = 6 + (kBpmZoneW - 8 - digitW) / 2;
-  }
-  tft_->setCursor(nx, 14);
-  tft_->print(buf);
+  auto drawHitDot = [&](int cx, int cy, int level, uint16_t lit) {
+    const uint16_t dim = darken_(lit, 0.22f);
+    uint16_t col = dim;
+    int r = 3;
+    if (level >= 3) {
+      col = lit;
+      r = kDotR;
+    } else if (level == 2) {
+      col = darken_(lit, 0.75f);
+      r = 4;
+    } else if (level == 1) {
+      col = darken_(lit, 0.45f);
+      r = 3;
+    }
+    tft_->fillCircle(cx, cy, r, col);
+    if (level == 0) {
+      tft_->drawCircle(cx, cy, 3, darken_(lit, 0.35f));
+    }
+  };
+  drawHitDot(kDotX, kKickY, kickLvl, kHitKick);
+  drawHitDot(kDotX, kSnareY, snareLvl, kHitSnare);
 }
 
 #if defined(BOARD_CARDPUTER_ADV)

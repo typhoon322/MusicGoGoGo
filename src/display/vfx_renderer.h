@@ -102,7 +102,8 @@ class VfxRenderer {
   int lastBpmDrawn_ = -2;  // -1 = "--", -2 = force redraw
   int heldBpmDisplay_ = -1;
   bool lastBpmLockDrawn_ = false;
-  bool lastBpmKickFlash_ = false;
+  int lastKickDotLevel_ = -1;
+  int lastSnareDotLevel_ = -1;
   int prevBarH_[64] = {};
   int prevPeakH_[64] = {};
   int lastBarLabelCount_ = -1;

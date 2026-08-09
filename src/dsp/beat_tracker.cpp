@@ -5,10 +5,10 @@
 #include <string.h>
 
 namespace {
-// True kick fundamental: 40–100 Hz only (exclude 100–200 where snare body lives).
-// Edges: 40–50,50–63,63–80,80–100 → bands 3..6
+// Kick follows bars ~6–7 on screen (80–125 Hz); keep some sub for body.
+// Edges: 40–50 … 100–125 → bands 3..7
 constexpr size_t kKickLo = 3;
-constexpr size_t kKickHi = 6;
+constexpr size_t kKickHi = 7;
 // Snare crack + upper body
 constexpr size_t kSnareLo = 20;
 constexpr size_t kSnareHi = 23;  // 2–5 kHz
