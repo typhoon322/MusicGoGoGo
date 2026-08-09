@@ -42,6 +42,11 @@ class BeatTracker {
   uint32_t lastAcceptedSnareMs_ = 0;
   uint32_t kickHoldUntil_ = 0;
   uint32_t snareHoldUntil_ = 0;
+  // Pending kick must decay quickly (reject sustained guitar/bass notes).
+  bool kickPending_ = false;
+  float kickPendingPeak_ = 0.0f;
+  uint32_t kickPendingMs_ = 0;
+  float slowKickEnergy_ = 0.0f;
 
   static constexpr size_t kIoiCap = 12;
   uint32_t ioiMs_[kIoiCap] = {};
