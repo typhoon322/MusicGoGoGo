@@ -6,3 +6,4 @@ launcher/*.bin
 .vscode/launch.json
 .vscode/ipch
 **/.DS_Store
+.worktrees/
