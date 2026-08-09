@@ -518,33 +518,21 @@ void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
     bpmShow = heldBpmDisplay_;
   }
 
-  auto pulseLevel = [](float p) -> int {
-    if (p > 0.75f) {
-      return 3;
-    }
-    if (p > 0.40f) {
-      return 2;
-    }
-    if (p > 0.12f) {
-      return 1;
-    }
-    return 0;
-  };
-  const int kickLvl = pulseLevel(ctx.kickPulse);
-  const int snareLvl = pulseLevel(ctx.snarePulse);
-
+  // Quantize levels so we redraw when loudness moves.
+  const int kickQ = static_cast<int>(ctx.kickPulse * 20.0f + 0.5f);
+  const int snareQ = static_cast<int>(ctx.snarePulse * 20.0f + 0.5f);
   const bool textDirty =
       (bpmShow != lastBpmDrawn_) || (beatLock != lastBpmLockDrawn_) || (lastKickDotLevel_ < 0);
-  const bool dotsDirty = (kickLvl != lastKickDotLevel_) || (snareLvl != lastSnareDotLevel_);
+  const bool dotsDirty = (kickQ != lastKickDotLevel_) || (snareQ != lastSnareDotLevel_);
   if (!textDirty && !dotsDirty) {
     return;
   }
   lastBpmDrawn_ = bpmShow;
   lastBpmLockDrawn_ = beatLock;
-  lastKickDotLevel_ = kickLvl;
-  lastSnareDotLevel_ = snareLvl;
+  lastKickDotLevel_ = kickQ;
+  lastSnareDotLevel_ = snareQ;
 
-  // Left: BPM text. Right: kick (blue) / snare (green) hit dots.
+  // Left: BPM text. Right: low(blue) / high(green) level dots.
   constexpr int kTextW = 50;
   if (textDirty) {
     tft_->fillRect(0, 0, kTextW, kHeaderH, kBg);
@@ -578,34 +566,27 @@ void VfxRenderer::drawBpmBadge_(const VfxDrawContext &ctx, bool beatLock) {
     tft_->print(buf);
   }
 
-  // Hit indicators — stacked to the right of the BPM digits.
   constexpr int kDotX = 62;
   constexpr int kKickY = 10;
   constexpr int kSnareY = 26;
-  constexpr int kDotR = 5;
   tft_->fillRect(kTextW, 0, kBpmZoneW - kTextW, kHeaderH, kBg);
 
-  auto drawHitDot = [&](int cx, int cy, int level, uint16_t lit) {
-    const uint16_t dim = darken_(lit, 0.22f);
-    uint16_t col = dim;
-    int r = 3;
-    if (level >= 3) {
-      col = lit;
-      r = kDotR;
-    } else if (level == 2) {
-      col = darken_(lit, 0.75f);
-      r = 4;
-    } else if (level == 1) {
-      col = darken_(lit, 0.45f);
-      r = 3;
+  auto drawHitDot = [&](int cx, int cy, float level, uint16_t lit) {
+    if (level < 0.0f) {
+      level = 0.0f;
     }
+    if (level > 1.0f) {
+      level = 1.0f;
+    }
+    const int r = 2 + static_cast<int>(level * 3.0f + 0.5f);  // 2..5
+    const uint16_t col = darken_(lit, 0.18f + level * 0.82f);
     tft_->fillCircle(cx, cy, r, col);
-    if (level == 0) {
-      tft_->drawCircle(cx, cy, 3, darken_(lit, 0.35f));
+    if (level < 0.08f) {
+      tft_->drawCircle(cx, cy, 3, darken_(lit, 0.30f));
     }
   };
-  drawHitDot(kDotX, kKickY, kickLvl, kHitKick);
-  drawHitDot(kDotX, kSnareY, snareLvl, kHitSnare);
+  drawHitDot(kDotX, kKickY, ctx.kickPulse, kHitKick);
+  drawHitDot(kDotX, kSnareY, ctx.snarePulse, kHitSnare);
 }
 
 #if defined(BOARD_CARDPUTER_ADV)

@@ -5,63 +5,41 @@
 #include <string.h>
 
 namespace {
-// Kick follows bars ~6–7 on screen (80–125 Hz); keep some sub for body.
-// Edges: 40–50 … 100–125 → bands 3..7
-constexpr size_t kKickLo = 3;
-constexpr size_t kKickHi = 7;
-// Snare crack + upper body
-constexpr size_t kSnareLo = 20;
-constexpr size_t kSnareHi = 23;  // 2–5 kHz
-// Brush / hat air — used to veto false kicks
-constexpr size_t kAirLo = 24;
-constexpr size_t kAirHi = 27;  // ~5–12.5 kHz
+// Low meter: ~40–160 Hz (bars that move with bass / kick body)
+constexpr size_t kBassLo = 3;
+constexpr size_t kBassHi = 8;
+// High meter: ~2–12.5 kHz
+constexpr size_t kHighLo = 20;
+constexpr size_t kHighHi = 27;
 
-constexpr uint32_t kKickRefractoryMs = 300;
-constexpr uint32_t kSnareRefractoryMs = 90;
-constexpr float kFluxMul = 1.55f;
-constexpr float kFluxFloor = 0.014f;
-constexpr float kKickEnergyMin = 0.055f;
-constexpr float kSnareEnergyMin = 0.030f;
-constexpr float kEnvAttack = 0.22f;
-constexpr float kEnvRelease = 0.06f;
-constexpr float kPulseDecay = 0.88f;
-constexpr float kBpmSmooth = 0.08f;
-constexpr float kConfSmooth = 0.18f;
-constexpr float kConfDecay = 0.992f;
+constexpr float kLevelAttack = 0.45f;
+constexpr float kLevelRelease = 0.18f;
+constexpr float kLevelGain = 1.35f;  // headroom so typical music fills the dots
+
+// Lightweight BPM from bass jumps only (does not drive the dots/LED).
+constexpr uint32_t kBpmRefractoryMs = 320;
 constexpr uint32_t kIoiMinMs = 375;
 constexpr uint32_t kIoiMaxMs = 857;
-constexpr float kIoiOutlier = 0.18f;
-
-// Kick must dominate crack/air or we treat the transient as snare/brush bleed.
-constexpr float kKickVsSnare = 1.25f;
-constexpr float kKickVsAir = 1.05f;
-// Percussive: rise from near baseline, then decay (guitar stays high).
-constexpr float kKickSlowE = 0.10f;
-constexpr float kKickFluxAbs = 0.055f;
-constexpr float kKickFluxRel = 1.6f;
-constexpr float kKickQuietPrev = 0.10f;
-constexpr float kKickDecayRatio = 0.72f;
-constexpr uint32_t kKickDecayWinMs = 160;
-constexpr float kKickInstantFlux = 0.14f;
-constexpr float kSnareVsKick = 1.35f;  // snare+air must beat kick band
-constexpr float kSnareFluxAbs = 0.05f;
-constexpr uint32_t kHitDebounceMs = 150;
-constexpr uint32_t kPulseHoldMs = 110;
+constexpr float kBpmFluxMin = 0.12f;
+constexpr float kBpmSmooth = 0.10f;
 }  // namespace
 
 void BeatTracker::reset() {
   state_ = BeatState{};
-  prevKick_ = prevSnare_ = 0.0f;
-  slowKickFlux_ = slowSnareFlux_ = 0.0f;
-  lastKickMs_ = lastSnareMs_ = lastBpmOnsetMs_ = lastGoodConfMs_ = 0;
-  lastAcceptedKickMs_ = lastAcceptedSnareMs_ = 0;
-  kickHoldUntil_ = snareHoldUntil_ = 0;
-  kickPending_ = false;
-  kickPendingPeak_ = 0.0f;
-  kickPendingMs_ = 0;
-  slowKickEnergy_ = 0.0f;
+  bassEma_ = highEma_ = prevBass_ = 0.0f;
+  lastBpmOnsetMs_ = lastGoodConfMs_ = 0;
   ioiCount_ = ioiHead_ = 0;
   memset(ioiMs_, 0, sizeof(ioiMs_));
+}
+
+float BeatTracker::clamp01_(float v) {
+  if (v < 0.0f) {
+    return 0.0f;
+  }
+  if (v > 1.0f) {
+    return 1.0f;
+  }
+  return v;
 }
 
 float BeatTracker::sumBands_(const float *levels, size_t count, size_t i0, size_t i1) const {
@@ -70,261 +48,96 @@ float BeatTracker::sumBands_(const float *levels, size_t count, size_t i0, size_
     return 0.0f;
   }
   const size_t hi = (i1 < count) ? i1 : (count - 1);
+  const size_t n = (hi >= i0) ? (hi - i0 + 1) : 1;
   for (size_t i = i0; i <= hi; ++i) {
     const float v = levels[i];
     if (v > 0.0f) {
       s += v;
     }
   }
-  return s;
+  // Average so wider ranges don't dominate unfairly.
+  return s / static_cast<float>(n);
 }
 
-uint32_t BeatTracker::medianIoi_() const {
-  if (ioiCount_ == 0) {
-    return 0;
-  }
-  uint32_t tmp[kIoiCap];
-  for (size_t i = 0; i < ioiCount_; ++i) {
-    const size_t idx = (ioiHead_ + kIoiCap - ioiCount_ + i) % kIoiCap;
-    tmp[i] = ioiMs_[idx];
-  }
-  for (size_t i = 1; i < ioiCount_; ++i) {
-    const uint32_t key = tmp[i];
-    size_t j = i;
-    while (j > 0 && tmp[j - 1] > key) {
-      tmp[j] = tmp[j - 1];
-      --j;
+void BeatTracker::maybeUpdateBpm_(float bass, float prevBass, uint32_t nowMs) {
+  const float flux = bass > prevBass ? (bass - prevBass) : 0.0f;
+  const bool ready = (lastBpmOnsetMs_ == 0) || (nowMs - lastBpmOnsetMs_ >= kBpmRefractoryMs);
+  if (!(flux >= kBpmFluxMin && bass >= 0.15f && ready)) {
+    if (lastBpmOnsetMs_ != 0 && (nowMs - lastBpmOnsetMs_) > 2000) {
+      state_.confidence *= 0.99f;
     }
-    tmp[j] = key;
+    return;
   }
-  return tmp[ioiCount_ / 2];
-}
 
-bool BeatTracker::acceptIoi_(uint32_t dt) const {
-  if (dt < kIoiMinMs || dt > kIoiMaxMs) {
-    return false;
-  }
-  if (ioiCount_ < 3) {
-    return true;
-  }
-  const uint32_t med = medianIoi_();
-  if (med == 0) {
-    return true;
-  }
-  const float rel = fabsf(static_cast<float>(dt) - static_cast<float>(med)) / static_cast<float>(med);
-  return rel <= kIoiOutlier;
-}
-
-bool BeatTracker::detectOnset_(float energy, float &prevEnergy, float &slowFlux, uint32_t &lastOnsetMs,
-                               uint32_t nowMs, uint32_t refractoryMs, float energyMin) {
-  const float flux = energy > prevEnergy ? (energy - prevEnergy) : 0.0f;
-  const float thr = slowFlux * kFluxMul + kFluxFloor;
-  const bool ready = (lastOnsetMs == 0) || (nowMs - lastOnsetMs >= refractoryMs);
-  const bool onset = flux > thr && energy >= energyMin && ready;
-
-  if (flux > slowFlux) {
-    slowFlux += (flux - slowFlux) * kEnvAttack;
-  } else {
-    slowFlux += (flux - slowFlux) * kEnvRelease;
-  }
-  prevEnergy = energy;
-
-  if (onset) {
-    lastOnsetMs = nowMs;
-    return true;
-  }
-  return false;
-}
-
-void BeatTracker::onKickOnset_(uint32_t nowMs) {
   if (lastBpmOnsetMs_ != 0) {
-    uint32_t dt = nowMs - lastBpmOnsetMs_;
-
-    if (state_.bpm >= 70.0f && state_.confidence >= 0.35f) {
-      const float expected = 60000.0f / state_.bpm;
-      const float d1 = fabsf(static_cast<float>(dt) - expected);
-      const float dHalf = fabsf(static_cast<float>(dt) - expected * 0.5f);
-      const float dDouble = fabsf(static_cast<float>(dt) - expected * 2.0f);
-      if (dDouble < d1 && dDouble < dHalf) {
-        const uint32_t half = dt / 2;
-        if (half >= kIoiMinMs && half <= kIoiMaxMs) {
-          dt = half;
-        }
-      } else if (dHalf < d1 && dt * 2u <= kIoiMaxMs) {
-        dt = dt * 2u;
-      }
-    }
-
-    if (acceptIoi_(dt)) {
+    const uint32_t dt = nowMs - lastBpmOnsetMs_;
+    if (dt >= kIoiMinMs && dt <= kIoiMaxMs) {
       ioiMs_[ioiHead_] = dt;
       ioiHead_ = (ioiHead_ + 1) % kIoiCap;
       if (ioiCount_ < kIoiCap) {
         ++ioiCount_;
       }
-      updateBpmFromIois_();
-    }
-  }
-  lastBpmOnsetMs_ = nowMs;
-  lastKickMs_ = nowMs;
-}
-
-void BeatTracker::updateBpmFromIois_() {
-  if (ioiCount_ < 4) {
-    return;
-  }
-  const uint32_t median = medianIoi_();
-  if (median == 0) {
-    return;
-  }
-  float bpm = 60000.0f / static_cast<float>(median);
-  if (bpm < 70.0f) {
-    bpm = 70.0f;
-  }
-  if (bpm > 160.0f) {
-    bpm = 160.0f;
-  }
-
-  uint32_t tmp[kIoiCap];
-  for (size_t i = 0; i < ioiCount_; ++i) {
-    const size_t idx = (ioiHead_ + kIoiCap - ioiCount_ + i) % kIoiCap;
-    tmp[i] = ioiMs_[idx];
-  }
-  float mean = 0.0f;
-  for (size_t i = 0; i < ioiCount_; ++i) {
-    mean += static_cast<float>(tmp[i]);
-  }
-  mean /= static_cast<float>(ioiCount_);
-  float var = 0.0f;
-  for (size_t i = 0; i < ioiCount_; ++i) {
-    const float d = static_cast<float>(tmp[i]) - mean;
-    var += d * d;
-  }
-  var /= static_cast<float>(ioiCount_);
-  const float cv = (mean > 1.0f) ? (sqrtf(var) / mean) : 1.0f;
-  float confTarget = 1.0f - cv * 1.35f;
-  if (confTarget < 0.0f) {
-    confTarget = 0.0f;
-  }
-  if (confTarget > 1.0f) {
-    confTarget = 1.0f;
-  }
-
-  if (state_.bpm < 1.0f) {
-    state_.bpm = bpm;
-  } else {
-    float a = kBpmSmooth;
-    if (state_.confidence > 0.55f) {
-      a *= 0.55f;
-    }
-    state_.bpm += (bpm - state_.bpm) * a;
-  }
-  state_.confidence += (confTarget - state_.confidence) * kConfSmooth;
-  if (state_.confidence > 0.4f) {
-    lastGoodConfMs_ = millis();
-  }
-}
-
-void BeatTracker::refreshPulses_(uint32_t nowMs) {
-  if (nowMs < kickHoldUntil_) {
-    state_.kickPulse = 1.0f;
-  } else {
-    state_.kickPulse *= kPulseDecay;
-    if (state_.kickPulse < 0.015f) {
-      state_.kickPulse = 0.0f;
-    }
-  }
-  if (nowMs < snareHoldUntil_) {
-    state_.snarePulse = 1.0f;
-  } else {
-    state_.snarePulse *= kPulseDecay;
-    if (state_.snarePulse < 0.015f) {
-      state_.snarePulse = 0.0f;
-    }
-  }
-}
-
-void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
-  refreshPulses_(nowMs);
-
-  const float kick = sumBands_(levels, count, kKickLo, kKickHi);
-  const float snare = sumBands_(levels, count, kSnareLo, kSnareHi);
-  const float air = sumBands_(levels, count, kAirLo, kAirHi);
-  const float snareHi = snare + air;
-
-  slowKickEnergy_ += (kick - slowKickEnergy_) * kKickSlowE;
-
-  auto acceptKick = [&]() {
-    if (lastAcceptedKickMs_ != 0 && nowMs - lastAcceptedKickMs_ < kHitDebounceMs) {
-      return;
-    }
-    lastAcceptedKickMs_ = nowMs;
-    kickHoldUntil_ = nowMs + kPulseHoldMs;
-    state_.kickPulse = 1.0f;
-    // Kick wins the window — don't also flash snare from the same thump.
-    snareHoldUntil_ = 0;
-    if (state_.snarePulse > 0.0f) {
-      state_.snarePulse = 0.0f;
-    }
-    onKickOnset_(nowMs);
-  };
-
-  if (kickPending_) {
-    if (kick > kickPendingPeak_) {
-      kickPendingPeak_ = kick;
-    }
-    const uint32_t age = nowMs - kickPendingMs_;
-    if (kick < kickPendingPeak_ * kKickDecayRatio && age >= 33) {
-      kickPending_ = false;
-      acceptKick();
-    } else if (age > kKickDecayWinMs) {
-      kickPending_ = false;
-    }
-  }
-
-  const float kickPrev = prevKick_;
-  const float kickFlux = kick > kickPrev ? (kick - kickPrev) : 0.0f;
-  const bool kickCand =
-      detectOnset_(kick, prevKick_, slowKickFlux_, lastKickMs_, nowMs, kKickRefractoryMs,
-                   kKickEnergyMin);
-  if (kickCand && !kickPending_) {
-    const bool bassDominant = (kick >= snare * kKickVsSnare) && (kick >= air * kKickVsAir);
-    const bool sharp =
-        kickFlux >= kKickFluxAbs && kickFlux >= slowKickEnergy_ * kKickFluxRel;
-    const bool fromQuiet = kickPrev <= (slowKickEnergy_ * 1.25f + kKickQuietPrev);
-    if (bassDominant && sharp && fromQuiet) {
-      if (kickFlux >= kKickInstantFlux && kick >= snareHi * 1.1f) {
-        acceptKick();
-      } else {
-        kickPending_ = true;
-        kickPendingPeak_ = kick;
-        kickPendingMs_ = nowMs;
+      if (ioiCount_ >= 4) {
+        uint32_t tmp[kIoiCap];
+        for (size_t i = 0; i < ioiCount_; ++i) {
+          const size_t idx = (ioiHead_ + kIoiCap - ioiCount_ + i) % kIoiCap;
+          tmp[i] = ioiMs_[idx];
+        }
+        for (size_t i = 1; i < ioiCount_; ++i) {
+          const uint32_t key = tmp[i];
+          size_t j = i;
+          while (j > 0 && tmp[j - 1] > key) {
+            tmp[j] = tmp[j - 1];
+            --j;
+          }
+          tmp[j] = key;
+        }
+        const float bpm = 60000.0f / static_cast<float>(tmp[ioiCount_ / 2]);
+        if (state_.bpm < 1.0f) {
+          state_.bpm = bpm;
+        } else {
+          state_.bpm += (bpm - state_.bpm) * kBpmSmooth;
+        }
+        if (state_.bpm < 70.0f) {
+          state_.bpm = 70.0f;
+        }
+        if (state_.bpm > 160.0f) {
+          state_.bpm = 160.0f;
+        }
+        state_.confidence += (0.55f - state_.confidence) * 0.2f;
+        lastGoodConfMs_ = nowMs;
       }
     }
   }
+  lastBpmOnsetMs_ = nowMs;
+}
 
-  const float snarePrev = prevSnare_;
-  const float snareFlux = snare > snarePrev ? (snare - snarePrev) : 0.0f;
-  const bool snareCand =
-      detectOnset_(snare, prevSnare_, slowSnareFlux_, lastSnareMs_, nowMs, kSnareRefractoryMs,
-                   kSnareEnergyMin);
-  const bool recentKick = (lastAcceptedKickMs_ != 0) && (nowMs - lastAcceptedKickMs_ < 120);
-  const bool hfDominant = snareHi >= kick * kSnareVsKick;
-  if (snareCand && snareFlux >= kSnareFluxAbs && hfDominant && !recentKick && !kickPending_ &&
-      (lastAcceptedSnareMs_ == 0 || nowMs - lastAcceptedSnareMs_ >= kHitDebounceMs)) {
-    lastAcceptedSnareMs_ = nowMs;
-    snareHoldUntil_ = nowMs + kPulseHoldMs;
-    state_.snarePulse = 1.0f;
-  }
+void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
+  const float bass = sumBands_(levels, count, kBassLo, kBassHi);
+  const float high = sumBands_(levels, count, kHighLo, kHighHi);
 
-  if (lastAcceptedKickMs_ != 0 && (nowMs - lastAcceptedKickMs_) > 1800) {
-    state_.confidence *= kConfDecay;
-  }
-  if (lastGoodConfMs_ != 0 && (nowMs - lastGoodConfMs_) > 3500 && state_.confidence < 0.2f) {
-    if (state_.confidence < 0.08f) {
-      state_.bpm = 0.0f;
-      ioiCount_ = 0;
-      ioiHead_ = 0;
-      lastBpmOnsetMs_ = 0;
+  // Attack/release envelope → smooth “dB-ish” brightness, no onset fireworks.
+  auto follow = [](float &ema, float x) {
+    if (x > ema) {
+      ema += (x - ema) * kLevelAttack;
+    } else {
+      ema += (x - ema) * kLevelRelease;
     }
+  };
+  follow(bassEma_, bass);
+  follow(highEma_, high);
+
+  // Soft curve so quiet rooms stay dim and loud fills the dots.
+  state_.kickPulse = clamp01_(powf(bassEma_ * kLevelGain, 0.85f));
+  state_.snarePulse = clamp01_(powf(highEma_ * kLevelGain, 0.85f));
+
+  maybeUpdateBpm_(bass, prevBass_, nowMs);
+  prevBass_ = bass;
+
+  if (lastGoodConfMs_ != 0 && (nowMs - lastGoodConfMs_) > 4000 && state_.confidence < 0.25f) {
+    state_.bpm = 0.0f;
+    ioiCount_ = 0;
+    ioiHead_ = 0;
+    lastBpmOnsetMs_ = 0;
   }
 }
