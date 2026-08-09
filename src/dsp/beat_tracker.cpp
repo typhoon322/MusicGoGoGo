@@ -5,27 +5,36 @@
 #include <string.h>
 
 namespace {
-// kick 3..9 = 40–200 Hz on kThird30EdgesHz
+// True kick fundamental: 40–100 Hz only (exclude 100–200 where snare body lives).
+// Edges: 40–50,50–63,63–80,80–100 → bands 3..6
 constexpr size_t kKickLo = 3;
-constexpr size_t kKickHi = 9;
-// snare 20..22 = 2–4 kHz
+constexpr size_t kKickHi = 6;
+// Snare crack + upper body
 constexpr size_t kSnareLo = 20;
-constexpr size_t kSnareHi = 22;
+constexpr size_t kSnareHi = 23;  // 2–5 kHz
+// Brush / hat air — used to veto false kicks
+constexpr size_t kAirLo = 24;
+constexpr size_t kAirHi = 27;  // ~5–12.5 kHz
 
-constexpr uint32_t kKickRefractoryMs = 280;  // ~214 BPM max; kills double-triggers
-constexpr uint32_t kSnareRefractoryMs = 100;
+constexpr uint32_t kKickRefractoryMs = 300;
+constexpr uint32_t kSnareRefractoryMs = 90;
 constexpr float kFluxMul = 1.55f;
-constexpr float kFluxFloor = 0.012f;
-constexpr float kEnergyMin = 0.035f;
-constexpr float kEnvAttack = 0.22f;   // update AFTER compare
+constexpr float kFluxFloor = 0.014f;
+constexpr float kKickEnergyMin = 0.055f;
+constexpr float kSnareEnergyMin = 0.030f;
+constexpr float kEnvAttack = 0.22f;
 constexpr float kEnvRelease = 0.06f;
-constexpr float kPulseDecay = 0.88f;  // longer white flash
-constexpr float kBpmSmooth = 0.08f;   // sticky tempo
+constexpr float kPulseDecay = 0.88f;
+constexpr float kBpmSmooth = 0.08f;
 constexpr float kConfSmooth = 0.18f;
 constexpr float kConfDecay = 0.992f;
-constexpr uint32_t kIoiMinMs = 375;  // 160 BPM
-constexpr uint32_t kIoiMaxMs = 857;  // 70 BPM
-constexpr float kIoiOutlier = 0.18f; // reject |dt-median|/median beyond this
+constexpr uint32_t kIoiMinMs = 375;
+constexpr uint32_t kIoiMaxMs = 857;
+constexpr float kIoiOutlier = 0.18f;
+
+// Kick must dominate crack/air or we treat the transient as snare/brush bleed.
+constexpr float kKickVsSnare = 1.25f;
+constexpr float kKickVsAir = 1.05f;
 }  // namespace
 
 void BeatTracker::reset() {
@@ -89,12 +98,11 @@ bool BeatTracker::acceptIoi_(uint32_t dt) const {
 }
 
 bool BeatTracker::detectOnset_(float energy, float &prevEnergy, float &slowFlux, uint32_t &lastOnsetMs,
-                               uint32_t nowMs, uint32_t refractoryMs, float &pulseOut) {
+                               uint32_t nowMs, uint32_t refractoryMs, float energyMin) {
   const float flux = energy > prevEnergy ? (energy - prevEnergy) : 0.0f;
-  // Compare against previous envelope, then adapt — avoids self-raising threshold.
   const float thr = slowFlux * kFluxMul + kFluxFloor;
   const bool ready = (lastOnsetMs == 0) || (nowMs - lastOnsetMs >= refractoryMs);
-  const bool onset = flux > thr && energy >= kEnergyMin && ready;
+  const bool onset = flux > thr && energy >= energyMin && ready;
 
   if (flux > slowFlux) {
     slowFlux += (flux - slowFlux) * kEnvAttack;
@@ -105,7 +113,6 @@ bool BeatTracker::detectOnset_(float energy, float &prevEnergy, float &slowFlux,
 
   if (onset) {
     lastOnsetMs = nowMs;
-    pulseOut = 1.0f;
     return true;
   }
   return false;
@@ -115,20 +122,17 @@ void BeatTracker::onKickOnset_(uint32_t nowMs) {
   if (lastBpmOnsetMs_ != 0) {
     uint32_t dt = nowMs - lastBpmOnsetMs_;
 
-    // Fold common octave errors toward the locked tempo.
     if (state_.bpm >= 70.0f && state_.confidence >= 0.35f) {
       const float expected = 60000.0f / state_.bpm;
       const float d1 = fabsf(static_cast<float>(dt) - expected);
       const float dHalf = fabsf(static_cast<float>(dt) - expected * 0.5f);
       const float dDouble = fabsf(static_cast<float>(dt) - expected * 2.0f);
       if (dDouble < d1 && dDouble < dHalf) {
-        // Missed a beat: interval is ~2 periods → use half for BPM calc.
         const uint32_t half = dt / 2;
         if (half >= kIoiMinMs && half <= kIoiMaxMs) {
           dt = half;
         }
       } else if (dHalf < d1 && dt * 2u <= kIoiMaxMs) {
-        // False double-speed hit: treat as one beat period.
         dt = dt * 2u;
       }
     }
@@ -143,6 +147,7 @@ void BeatTracker::onKickOnset_(uint32_t nowMs) {
     }
   }
   lastBpmOnsetMs_ = nowMs;
+  lastKickMs_ = nowMs;
 }
 
 void BeatTracker::updateBpmFromIois_() {
@@ -189,7 +194,6 @@ void BeatTracker::updateBpmFromIois_() {
   if (state_.bpm < 1.0f) {
     state_.bpm = bpm;
   } else {
-    // Extra stickiness when already confident.
     float a = kBpmSmooth;
     if (state_.confidence > 0.55f) {
       a *= 0.55f;
@@ -214,20 +218,36 @@ void BeatTracker::process(const float *levels, size_t count, uint32_t nowMs) {
 
   const float kick = sumBands_(levels, count, kKickLo, kKickHi);
   const float snare = sumBands_(levels, count, kSnareLo, kSnareHi);
+  const float air = sumBands_(levels, count, kAirLo, kAirHi);
 
-  if (detectOnset_(kick, prevKick_, slowKickFlux_, lastKickMs_, nowMs, kKickRefractoryMs,
-                   state_.kickPulse)) {
-    onKickOnset_(nowMs);
+  const bool snareOn =
+      detectOnset_(snare, prevSnare_, slowSnareFlux_, lastSnareMs_, nowMs, kSnareRefractoryMs,
+                   kSnareEnergyMin);
+  if (snareOn) {
+    state_.snarePulse = 1.0f;
+    lastSnareMs_ = nowMs;
   }
-  detectOnset_(snare, prevSnare_, slowSnareFlux_, lastSnareMs_, nowMs, kSnareRefractoryMs,
-               state_.snarePulse);
 
-  // Idle: gently decay confidence, but keep last BPM so UI does not flap to "--".
+  const bool kickCand =
+      detectOnset_(kick, prevKick_, slowKickFlux_, lastKickMs_, nowMs, kKickRefractoryMs,
+                   kKickEnergyMin);
+  if (kickCand) {
+    // Spectral veto: brushes/snares light crack+air without a real sub kick.
+    const bool bassDominant = (kick >= snare * kKickVsSnare) && (kick >= air * kKickVsAir);
+    // If snare/air just fired, require even stronger bass dominance.
+    const bool recentSnare = (lastSnareMs_ != 0) && (nowMs - lastSnareMs_ < 60);
+    const bool ok = bassDominant && (!recentSnare || kick >= snare * 1.6f);
+    if (ok) {
+      state_.kickPulse = 1.0f;
+      onKickOnset_(nowMs);
+    }
+    // else: low-band bleed from brush — do not flash / do not feed BPM
+  }
+
   if (lastKickMs_ != 0 && (nowMs - lastKickMs_) > 1800) {
     state_.confidence *= kConfDecay;
   }
   if (lastGoodConfMs_ != 0 && (nowMs - lastGoodConfMs_) > 3500 && state_.confidence < 0.2f) {
-    // Long silence after unlock — clear tempo estimate.
     if (state_.confidence < 0.08f) {
       state_.bpm = 0.0f;
       ioiCount_ = 0;

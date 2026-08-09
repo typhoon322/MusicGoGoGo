@@ -20,7 +20,7 @@ class BeatTracker {
  private:
   float sumBands_(const float *levels, size_t count, size_t i0, size_t i1) const;
   bool detectOnset_(float energy, float &prevEnergy, float &slowFlux, uint32_t &lastOnsetMs,
-                    uint32_t nowMs, uint32_t refractoryMs, float &pulseOut);
+                    uint32_t nowMs, uint32_t refractoryMs, float energyMin);
   void onKickOnset_(uint32_t nowMs);
   void updateBpmFromIois_();
   uint32_t medianIoi_() const;
