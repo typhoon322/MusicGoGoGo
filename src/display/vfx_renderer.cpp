@@ -347,17 +347,39 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
 
   constexpr float kMusicOn = 0.035f;
   const bool dancing = vu >= kMusicOn;
-  const int walkFrame = static_cast<int>((ctx.frameMs / 110) % 2);
+  constexpr float kConfUse = 0.45f;
+  const bool beatLock = dancing && ctx.beatConfidence >= kConfUse && ctx.beatBpm >= 70.0f;
 
-  // Motion: stroll across the header when quiet; big rhythmic hops with music.
+  // Motion: beat-locked walk/hops when locked; VU fake hop when dancing;
+  // slow stroll when quiet.
   float targetHop = 0.0f;
-  if (dancing) {
+  int walkFrame = 0;
+  if (beatLock) {
+    const float bpm = ctx.beatBpm;
+    const float beatPeriodMs = 60000.0f / bpm;
+    walkFrame = static_cast<int>(fmodf(static_cast<float>(ctx.frameMs), beatPeriodMs) /
+                                 (beatPeriodMs * 0.5f)) &
+                1;
+    // Walk speed: 70→~1.2px/frame, 160→~2.8px/frame (~30FPS coarse tune)
+    const float t = (bpm - 70.0f) / 90.0f;
+    const float speed = 1.2f + t * 1.6f;
+    catX_ += static_cast<float>(catDir_) * speed;
+
+    if (ctx.kickPulse > 0.15f) {
+      targetHop = 10.0f + ctx.kickPulse * 16.0f;
+    } else if (ctx.snarePulse > 0.15f) {
+      targetHop = 3.0f + ctx.snarePulse * 6.0f;
+    }
+  } else if (dancing) {
+    // Original VU fake-beat path
+    const int wf = static_cast<int>((ctx.frameMs / 110) % 2);
+    walkFrame = wf;
     const float tempo = 0.018f + vu * 0.045f;
     const float beat = sinf(static_cast<float>(ctx.frameMs) * tempo);
-    // Emphasize the upbeat — bigger vertical travel in the taller header.
     targetHop = (beat > 0.0f ? beat : 0.0f) * (10.0f + vu * 16.0f);
     catX_ += static_cast<float>(catDir_) * (0.4f + vu * 1.2f);
   } else {
+    walkFrame = static_cast<int>((ctx.frameMs / 110) % 2);
     targetHop = walkFrame ? 1.5f : 0.0f;
     catX_ += static_cast<float>(catDir_) * 2.2f;
   }
@@ -418,9 +440,12 @@ void VfxRenderer::drawDancingCat_(const VfxDrawContext &ctx) {
   tft_->fillCircle(headX + 2 * f, cy - 15, 1, kCatDark);
   tft_->fillCircle(headX + 5 * f, cy - 12, 1, kCatDark);
 
-  // big wagging tail
-  const int tailSwing = dancing ? static_cast<int>(sinf(ctx.frameMs * 0.028f) * 6.0f)
-                                : (walkFrame ? 4 : -3);
+  // big wagging tail — snare accent when beat-locked
+  const int tailSwing = beatLock
+                            ? static_cast<int>(ctx.snarePulse * 10.0f +
+                                              sinf(ctx.frameMs * 0.028f) * 3.0f)
+                            : (dancing ? static_cast<int>(sinf(ctx.frameMs * 0.028f) * 6.0f)
+                                       : (walkFrame ? 4 : -3));
   const int tailX = cx - 12 * f;
   const int tailY = cy - 18 - tailSwing;
   tft_->drawLine(hipX - 2 * f, cy - 10, tailX, tailY, kCatOrange);
