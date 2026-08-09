@@ -3,7 +3,7 @@
 > **Preferred Chinese version:** [`2026-08-09-beat-sync-cat-design.zh.md`](./2026-08-09-beat-sync-cat-design.zh.md)
 
 Date: 2026-08-09  
-Status: approved for planning  
+Status: implemented  
 Target: ESP32-S3 primary (header cat); Cardputer ADV may compile the tracker but need not draw the cat if it has no header cat path
 
 ## Goal

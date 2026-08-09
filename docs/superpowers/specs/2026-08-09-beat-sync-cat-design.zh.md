@@ -1,7 +1,7 @@
 # 节拍同步跳舞猫（底鼓 + 军鼓）
 
 日期：2026-08-09  
-状态：已批准，实现计划已出（见 `docs/superpowers/plans/2026-08-09-beat-sync-cat.zh.md`）  
+状态：已实现  
 目标：以 ESP32-S3 为主（顶栏猫）；Cardputer ADV 可编译 tracker，若无顶栏猫路径可不绘制
 
 ## 目标
